@@ -1,0 +1,45 @@
+paths:
+  user_home_dir: /home/vg0233/PillowLab/SVAE
+  bsds300: bsds300
+  bsds300_prewhitened: bsds300_prewhitened
+  patches: patches.pt
+  scratch: ''
+bin:
+  sample_patches_vanilla:
+    n_test_patches: 16384
+    n_train_patches: 65536
+    n_val_patches: 16384
+    seed: 42
+    destination: cwd
+  sample_patches_custom:
+    n_patches: 100000.0
+    seed: 42
+    train_frac: 0.7
+    test_frac: 0.15
+    pca_frac: 0.8
+    destination: cwd
+  train_svae:
+    batch_size: 32
+    checkpoint_every: 5
+    collapse_delta: 0.1
+    cuda_device: 0
+    learning_rate: 0.001
+    likelihood_logscale: -2
+    log_every: 1
+    num_epochs: 20
+    prior: LAPLACE
+    prior_scale: 1.0
+    shuffle: true
+    use_cuda: false
+tests:
+  evaluate_ll:
+    chain_length: 100
+    mdl_path: outputs/2022-06-28/10-41-34/
+    n_sample: 16
+    schedule_type: linear
+    sampler: hmc
+    hmc_epsilon: 0.01
+  bdmc:
+    mdl_path: outputs/2022-06-28/10-41-34/
+    schedule_type: linear
+    sampler: hmc

@@ -1,0 +1,74 @@
+Batch 0, stats: 93.450 ± 42.800, avg AR: 0.6725, L1(cumulAR - 0.65): 53.164
+Batch 1, stats: 85.442 ± 41.168, avg AR: 0.6777, L1(cumulAR - 0.65): 56.372
+Batch 2, stats: 91.826 ± 42.244, avg AR: 0.6724, L1(cumulAR - 0.65): 54.113
+Batch 3, stats: 85.568 ± 34.100, avg AR: 0.6816, L1(cumulAR - 0.65): 56.445
+Batch 4, stats: 77.503 ± 55.947, avg AR: 0.6795, L1(cumulAR - 0.65): 56.807
+Batch 5, stats: 80.837 ± 50.656, avg AR: 0.6810, L1(cumulAR - 0.65): 56.534
+Batch 6, stats: 90.705 ± 48.664, avg AR: 0.6739, L1(cumulAR - 0.65): 54.753
+Batch 7, stats: 88.717 ± 37.638, avg AR: 0.6783, L1(cumulAR - 0.65): 55.708
+Batch 8, stats: 74.720 ± 52.242, avg AR: 0.6840, L1(cumulAR - 0.65): 57.780
+Batch 9, stats: 94.963 ± 35.093, avg AR: 0.6760, L1(cumulAR - 0.65): 55.442
+Batch 10, stats: 96.674 ± 42.944, avg AR: 0.6728, L1(cumulAR - 0.65): 53.662
+Batch 11, stats: 81.384 ± 40.017, avg AR: 0.6834, L1(cumulAR - 0.65): 55.918
+Batch 12, stats: 92.659 ± 36.389, avg AR: 0.6768, L1(cumulAR - 0.65): 54.831
+Batch 13, stats: 96.331 ± 36.982, avg AR: 0.6745, L1(cumulAR - 0.65): 53.450
+Batch 14, stats: 60.961 ± 57.252, avg AR: 0.6885, L1(cumulAR - 0.65): 60.682
+Batch 15, stats: 97.292 ± 32.970, avg AR: 0.6714, L1(cumulAR - 0.65): 54.884
+Batch 16, stats: 81.730 ± 41.992, avg AR: 0.6838, L1(cumulAR - 0.65): 57.405
+Batch 17, stats: 90.411 ± 43.237, avg AR: 0.6746, L1(cumulAR - 0.65): 53.737
+Batch 18, stats: 79.473 ± 46.575, avg AR: 0.6801, L1(cumulAR - 0.65): 57.013
+Batch 19, stats: 79.222 ± 35.541, avg AR: 0.6875, L1(cumulAR - 0.65): 57.959
+Batch 20, stats: 74.261 ± 42.992, avg AR: 0.6847, L1(cumulAR - 0.65): 58.867
+Batch 21, stats: 80.797 ± 39.942, avg AR: 0.6831, L1(cumulAR - 0.65): 56.213
+Batch 22, stats: 81.886 ± 44.580, avg AR: 0.6795, L1(cumulAR - 0.65): 57.142
+Batch 23, stats: 77.260 ± 43.396, avg AR: 0.6852, L1(cumulAR - 0.65): 58.834
+Batch 24, stats: 86.456 ± 58.386, avg AR: 0.6714, L1(cumulAR - 0.65): 53.582
+Batch 25, stats: 85.808 ± 39.095, avg AR: 0.6817, L1(cumulAR - 0.65): 57.027
+Batch 26, stats: 91.619 ± 36.182, avg AR: 0.6766, L1(cumulAR - 0.65): 55.571
+Batch 27, stats: 73.463 ± 51.178, avg AR: 0.6823, L1(cumulAR - 0.65): 56.924
+Batch 28, stats: 93.531 ± 40.193, avg AR: 0.6727, L1(cumulAR - 0.65): 53.734
+Batch 29, stats: 85.734 ± 47.542, avg AR: 0.6778, L1(cumulAR - 0.65): 54.609
+Batch 30, stats: 96.351 ± 37.958, avg AR: 0.6718, L1(cumulAR - 0.65): 52.086
+Batch 31, stats: 79.823 ± 44.048, avg AR: 0.6836, L1(cumulAR - 0.65): 58.445
+--------------------------------------------------------------------------------
+Model:  SVAE(
+  (fc1): Linear(in_features=144, out_features=128, bias=True)
+  (fc21): Linear(in_features=128, out_features=256, bias=True)
+  (fc22): Linear(in_features=128, out_features=512, bias=True)
+  (fc31): Linear(in_features=256, out_features=256, bias=True)
+  (fc32): Linear(in_features=512, out_features=512, bias=True)
+  (fc41): Linear(in_features=256, out_features=169, bias=True)
+  (fc42): Linear(in_features=512, out_features=169, bias=True)
+  (Phi): Linear(in_features=169, out_features=144, bias=True)
+  (_encoder): ModuleList(
+    (0): Linear(in_features=144, out_features=128, bias=True)
+    (1): Linear(in_features=128, out_features=256, bias=True)
+    (2): Linear(in_features=128, out_features=512, bias=True)
+    (3): Linear(in_features=256, out_features=256, bias=True)
+    (4): Linear(in_features=512, out_features=512, bias=True)
+    (5): Linear(in_features=256, out_features=169, bias=True)
+    (6): Linear(in_features=512, out_features=169, bias=True)
+  )
+  (_decoder): ModuleList(
+    (0): Linear(in_features=169, out_features=144, bias=True)
+  )
+)
+
+Evaluation: AIS procedure, with config:
+chain_length: 1024
+mdl_path: outputs/2022-09-07/10-03-20
+n_sample: 16
+schedule_type: linear
+sampler: hmc
+hmc_epsilon: 0.8
+
+Log-likelihood: 85.21434 ± 43.76722 per batch, averaged over dataset
+Average acceptance rate        : 0.67878 ± 0.00504
+Average l1(cumul_avg_AR - 0.65): 0.05462 ± 0.00192
+          Time: 667.053 s
+
+
+Baseline: Likelihood weighting
+Log-likelihood: -334.50033 ± 95.99614
+          Time: 0.197 s
+

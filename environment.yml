@@ -1,0 +1,52 @@
+name: svae4
+
+channels:
+    - pytorch
+    - conda-forge
+    - defaults
+
+dependencies:
+    - python
+
+    # Package dependencies
+    - numpy
+    - scikit-learn
+    - scipy
+    - pytorch::pytorch
+    - pytorch::torchvision
+
+    # Requirements for notebooks and scripts in ./bin
+    - ignite
+    - celer
+    - matplotlib
+    - seaborn
+    - tensorboard
+    - tqdm
+    - conda-forge::jax
+    - conda-forge::jaxlib=*=*cuda*
+    - optax
+
+    # Development tools
+    - black
+    - flake8
+    - hypothesis
+    - isort
+    - mypy
+    - pytest
+
+    - mkl < 2022
+
+    # Enable access from Jupyter lab
+    - ipykernel
+    - ipywidgets
+
+    - pip
+    - pip:
+        - -e .
+        - hydra-core
+        - flake8-bugbear
+        - flake8-builtins
+        - flake8-docstrings
+        - flake8-isort
+        - flake8-print
+        - torch-tb-profiler
