@@ -35,7 +35,7 @@ def log_train_metrics(
     writer: tensorboard.writer.SummaryWriter,
 ) -> None:
     """Log metrics after each epoch."""
-    if trainer.state.epoch % cfg.bin.train_svae.log_every != 0:
+    if trainer.state.epoch % cfg.train.svae.log_every != 0:
         return
     avg_neg_elbo = trainer.state.metrics["loss"]
     avg_nll = trainer.state.metrics["nll"]
@@ -64,7 +64,7 @@ def compute_and_print_eval_metrics(
     writer: tensorboard.writer.SummaryWriter,
 ) -> None:
     """Compute and prints metrics on the validation set."""
-    if trainer.state.epoch % cfg.bin.train_svae.log_every != 0:
+    if trainer.state.epoch % cfg.train.svae.log_every != 0:
         return
     evaluator.run(dataloader, max_epochs=1)
     metrics = evaluator.state.metrics
@@ -95,8 +95,8 @@ def compute_and_print_eval_metrics(
 @hydra.main(config_path="../conf", config_name="config", version_base="1.1")
 def run(cfg: omegaconf.OmegaConf) -> None:
     """Trains the SVAE."""
-    torch.manual_seed(cfg.bin.sample_patches_vanilla.seed)
-    random.seed(cfg.bin.sample_patches_vanilla.seed)
+    torch.manual_seed(cfg.train.seed)
+    random.seed(cfg.train.seed)
 
     git_hash = (
         subprocess.run(["git", "describe", "--always", "--dirty"], capture_output=True)
@@ -106,8 +106,8 @@ def run(cfg: omegaconf.OmegaConf) -> None:
     logger.info("Git hash: %s", git_hash)
 
     device = (
-        torch.device("cuda", cfg.bin.train_svae.cuda_device)
-        if (torch.cuda.is_available() and cfg.bin.train_svae.use_cuda)
+        torch.device("cuda", cfg.train.svae.cuda_device)
+        if (torch.cuda.is_available() and cfg.train.svae.use_cuda)
         else torch.device("cpu")
     )
     logger.info("Using device: %s", device)
@@ -121,20 +121,20 @@ def run(cfg: omegaconf.OmegaConf) -> None:
     logger.info("Loading data...")
     train_loader, val_loader, _ = data.get_dataloaders(
         pathlib.Path(cfg.paths.user_home_dir) / pathlib.Path(cfg.paths.scratch) / "patches.pt",
-        batch_size=cfg.bin.train_svae.batch_size,
-        shuffle=cfg.bin.train_svae.shuffle,
+        batch_size=cfg.train.svae.batch_size,
+        shuffle=cfg.train.svae.shuffle,
         device=device,
     )
 
     logger.info("Constructing model...")
     model = models.SVAE(
-        prior=models.Prior[cfg.bin.train_svae.prior],
-        prior_scale=cfg.bin.train_svae.prior_scale,
-        likelihood_logscale=cfg.bin.train_svae.likelihood_logscale,
-        collapse_delta=cfg.bin.train_svae.collapse_delta,
+        prior=models.Prior[cfg.models.svae.prior],
+        prior_scale=cfg.models.svae.prior_scale,
+        likelihood_logscale=cfg.models.svae.likelihood_logscale,
+        collapse_delta=cfg.models.svae.collapse_delta,
     ).to(device)
     optimizer = optim.Adam(  # type: ignore
-        model.parameters(), lr=cfg.bin.train_svae.learning_rate
+        model.parameters(), lr=cfg.train.svae.learning_rate
     )
     # optimizer = optim.Adam([ # type: ignore
     #     {'params': model._encoder.parameters(), 'lr':cfg.bin.train_svae.learning_rate},
@@ -222,13 +222,13 @@ def run(cfg: omegaconf.OmegaConf) -> None:
 
     checkpointer = ignite.handlers.ModelCheckpoint(".", "svae")
     trainer.add_event_handler(
-        ignite.engine.Events.EPOCH_COMPLETED(every=cfg.bin.train_svae.checkpoint_every),
+        ignite.engine.Events.EPOCH_COMPLETED(every=cfg.train.svae.checkpoint_every),
         checkpointer,
         {"checkpoint": model},
     )
 
     logger.info("Beginning training...")
-    trainer.run(train_loader, max_epochs=cfg.bin.train_svae.num_epochs)
+    trainer.run(train_loader, max_epochs=cfg.train.svae.num_epochs)
     torch.save(model.state_dict(), "svae_final.pth")
 
 

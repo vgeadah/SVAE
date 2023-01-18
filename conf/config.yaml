@@ -24,37 +24,38 @@ bin:
         test_frac: 0.15  # val_frac = 1 - train_frac - test_frac
         pca_frac: 0.8  # In paper: pi / 4
         destination: "cwd"  # Or "scratch", for scratch dir
-    train_svae:
-        batch_size: 32
-        checkpoint_every: 5
-        collapse_delta: 0.1
-        cuda_device: 1
-        learning_rate: 0.001
-        likelihood_logscale: -2
-        log_every: 1
-        num_epochs: 20
-        prior: "LAPLACE"
-        prior_scale: 1.0
-        shuffle: True
-        use_cuda: True
 
 train:
+    seed: 42
+    svae:
+        batch_size: 32
+        cuda_device: 0
+        learning_rate: 0.001
+        log_every: 1
+        num_epochs: 20
+        shuffle: True
+        use_cuda: True
+        checkpoint_every: 5
     sparsenet:
-        seed: 42
         num_steps: 10000               # Number of optimization steps to take
         minibatch_size: 32             # Number of images in each minibatc
         learning_rate: 5.0             # Features Learning rate
         learning_rate_decay: 0.9995    # Learning rate decay factor
         dict_coefs_tol: 0.001          # Optimization tolerance for sparse dictionary coefficients
-        dict_coefs_lambda: 0.6        # use: 0.6. Sparsity penalty for sparse dictionry coefficients
+        dict_coefs_lambda: 0.6        # Sparsity penalty for sparse dictionry coefficients
 
 models:
+    svae:
+        prior: "LAPLACE"
+        collapse_delta: 0.1
+        prior_scale: 1.0
+        likelihood_logscale: -2
     sparsenet:
         num_filters: 169               # Number of filters to use
         prior: "LAPLACE"
         likelihood_logscale: -2.0
  
-tests:    
+evaluate:    
     evaluate_ll:
         chain_length: 100
         mdl_path: outputs/2022-06-28/10-41-34/
