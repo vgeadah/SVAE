@@ -2,6 +2,7 @@
 
 # ignore all
 X_*.py
+*.slurm
 
 # Ignore slurm outputs
 slurm-*.out

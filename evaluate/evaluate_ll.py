@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 def dataset_to_dataloader(cfg: omegaconf.OmegaConf, dataset) -> None:
     base_sampler = torch.utils.data.RandomSampler
     test_sampler = torch.utils.data.BatchSampler(  # type: ignore
-        base_sampler(dataset), cfg.bin.train_svae.batch_size, drop_last=False  # type: ignore
+        base_sampler(dataset), cfg.train.svae.batch_size, drop_last=False  # type: ignore
     )
     test_loader = torch.utils.data.DataLoader(  # type: ignore
         dataset, sampler=test_sampler, collate_fn=lambda x: x[0]  # type: ignore
@@ -78,7 +78,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
 
     # Sparsnet
     model = Sparsenet().to(device)
-    model_path = to_absolute_path(cfg.tests.evaluate_ll.mdl_path)
+    model_path = to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
     model_cfg = omegaconf.OmegaConf.load(model_path+'/.hydra/config.yaml')
     filename = model_cfg.models.sparsenet.prior+"_final_N{:}_llscale{:1.1e}_nf{:3d}_lr{:}.pth".format(
         model_cfg.train.sparsenet.num_steps,
@@ -101,8 +101,8 @@ def main(cfg: omegaconf.OmegaConf) -> None:
     # Get data
     _, _, test_loader = data.get_dataloaders(
         pathlib.Path(cfg.paths.user_home_dir) / pathlib.Path(cfg.paths.scratch) / "patches.pt",
-        batch_size=cfg.bin.train_svae.batch_size,
-        shuffle=cfg.bin.train_svae.shuffle,
+        batch_size=cfg.train.svae.batch_size,
+        shuffle=cfg.train.svae.shuffle,
         device=device,
     )
     batches = []
@@ -120,26 +120,26 @@ def main(cfg: omegaconf.OmegaConf) -> None:
     USE_SEARCH_EPS = False 
     if USE_SEARCH_EPS:
         df = pd.read_csv(cfg.paths.user_home_dir+'/calculations/hmc_epsilon.csv')
-        epsilon = df.query(f"Model_path=='{cfg.tests.evaluate_ll.mdl_path}'")['HMC_epsilon'].values[0]
+        epsilon = df.query(f"Model_path=='{cfg.eval.evaluate_ll.mdl_path}'")['HMC_epsilon'].values[0]
     else:
-        epsilon = cfg.tests.evaluate_ll.hmc_epsilon
+        epsilon = cfg.eval.evaluate_ll.hmc_epsilon
     ais_start = time.time()
 
     def local_ais(
             model,
             loader,
-            hmc_epsilon: float = cfg.tests.evaluate_ll.hmc_epsilon,
+            hmc_epsilon: float = cfg.eval.evaluate_ll.hmc_epsilon,
             verbose: bool = False,
             ):
         with torch.no_grad():
             ais_estimate, (avg_ARs, l1_065s) = ais(
                     model, 
                     loader, 
-                    ais_length=cfg.tests.evaluate_ll.chain_length, 
-                    n_samples=cfg.tests.evaluate_ll.n_sample,
+                    ais_length=cfg.eval.evaluate_ll.chain_length, 
+                    n_samples=cfg.eval.evaluate_ll.n_sample,
                     verbose=verbose, 
-                    sampler=cfg.tests.evaluate_ll.sampler,
-                    schedule_type=cfg.tests.evaluate_ll.schedule_type,
+                    sampler=cfg.eval.evaluate_ll.sampler,
+                    schedule_type=cfg.eval.evaluate_ll.schedule_type,
                     epsilon_init=hmc_epsilon,
                     device=device,
                 )
@@ -173,7 +173,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
             onebatch_loader = iter([test_dataset[0]])
             ais_estimate, (avg_ARs, l1_065s) = local_ais(model, onebatch_loader, hmc_epsilon=eps)
             
-            l1_error = (torch.tensor(l1_065s)/cfg.tests.evaluate_ll.chain_length)[0].item()
+            l1_error = (torch.tensor(l1_065s)/cfg.eval.evaluate_ll.chain_length)[0].item()
             AR_error = torch.tensor(avg_ARs).mean() - 0.65
             
             logger.info('[{:}] AIS estimate: {:2.2f}, Avg AR: {:.4f}, HMC epsilon: {:2.3f}, L1 error: {:.4f}'.format(
@@ -213,7 +213,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
             ais_estimate.mean(), ais_estimate.std())
             )
         avg_ARs = torch.tensor(avg_ARs)
-        l1_065s = torch.tensor(l1_065s)/cfg.tests.evaluate_ll.chain_length
+        l1_065s = torch.tensor(l1_065s)/cfg.eval.evaluate_ll.chain_length
         logger.info('Average acceptance rate        : {:5.5f} ± {:5.5f}'.format(avg_ARs.mean(), avg_ARs.std()))
         logger.info('Average l1(cumul_avg_AR - 0.65): {:5.5f} ± {:5.5f}'.format(l1_065s.mean(), l1_065s.std()))
 
@@ -226,17 +226,17 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         # model_path = '.'
     else:
         file_name = 'll_estimate'
-    file_suffix = f'_cl{cfg.tests.evaluate_ll.chain_length}_schedule-{cfg.tests.evaluate_ll.schedule_type}_eps{epsilon:.4f}.pt'
+    file_suffix = f'_cl{cfg.eval.evaluate_ll.chain_length}_schedule-{cfg.eval.evaluate_ll.schedule_type}_eps{epsilon:.4f}.pt'
     print('Saving AIS estimate to:', str(model_path+'/'+file_name+file_suffix))
     torch.save(ais_estimate, model_path+'/'+file_name+file_suffix)
     
     print('-'*80+'\nModel: ', model)
-    print('\nEvaluation: AIS procedure, with config:\n'+ omegaconf.OmegaConf.to_yaml(cfg.tests.evaluate_ll))
+    print('\nEvaluation: AIS procedure, with config:\n'+ omegaconf.OmegaConf.to_yaml(cfg.eval.evaluate_ll))
     print('Log-likelihood: {:5.5f} ± {:5.5f} per batch, averaged over dataset'.format(
         ais_estimate.mean(), ais_estimate.std()))
     
     avg_ARs = torch.tensor(avg_ARs)
-    l1_065s = torch.tensor(l1_065s)/cfg.tests.evaluate_ll.chain_length
+    l1_065s = torch.tensor(l1_065s)/cfg.eval.evaluate_ll.chain_length
     print('Average acceptance rate        : {:5.5f} ± {:5.5f}'.format(avg_ARs.mean(), avg_ARs.std()))
     print('Average l1(cumul_avg_AR - 0.65): {:5.5f} ± {:5.5f}'.format(l1_065s.mean(), l1_065s.std()))
 

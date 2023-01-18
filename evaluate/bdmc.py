@@ -141,30 +141,30 @@ def search(model, local_ais, loader) -> None:
 @hydra.main(config_path="../conf", config_name="config", version_base="1.1")
 def main(cfg: omegaconf.OmegaConf) -> None:
     device = (
-        torch.device("cuda", cfg.bin.train_svae.cuda_device)
-        if (torch.cuda.is_available() and cfg.bin.train_svae.use_cuda)
+        torch.device("cuda", cfg.train.svae.cuda_device)
+        if (torch.cuda.is_available() and cfg.train.svae.use_cuda)
         else torch.device("cpu")
     )
     COMPUTE_BASELINE=False
 
     set_seed(cfg.bin.sample_patches_vanilla.seed)
 
-    def local_ais(model, loader, cl=cfg.tests.evaluate_ll.chain_length, forward=True):
+    def local_ais(model, loader, cl=cfg.eval.evaluate_ll.chain_length, forward=True):
         estimate, _ = ais(
             model, 
             loader, 
             ais_length=cl, 
             verbose=True, 
-            sampler=cfg.tests.bdmc.sampler,
-            schedule_type=cfg.tests.bdmc.schedule_type,
+            sampler=cfg.eval.bdmc.sampler,
+            schedule_type=cfg.eval.bdmc.schedule_type,
             forward=forward,
-            epsilon_init=cfg.tests.evaluate_ll.hmc_epsilon,
+            epsilon_init=cfg.eval.evaluate_ll.hmc_epsilon,
         )
         return estimate
 
     # Construct model
     model = SVAE().to(device)
-    model_path = to_absolute_path(cfg.tests.bdmc.mdl_path)
+    model_path = to_absolute_path(cfg.eval.bdmc.mdl_path)
     model.load_state_dict(torch.load(model_path+'/svae_final.pth'))
     # # parent_dir = os.path.abspath(os.path.join(os.getcwd(), os.pardir))
     # # model.load_state_dict(torch.load(str(parent_dir)+'/'+str(cfg.tests.bdmc.mdl_path)))

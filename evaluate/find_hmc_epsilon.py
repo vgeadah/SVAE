@@ -21,7 +21,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
 
     ## SVAE
     #model = SVAE().to(device)
-    #model_path = to_absolute_path(cfg.tests.evaluate_ll.mdl_path)
+    #model_path = to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
     ## model_path = '/Volumes/GEADAH_3/3_Research/PillowLab/SVAE/SavedModels/SVAE/seed42/pCAUCHY_pscale-1.0_llogscale0.0_lr-2e+00_nepochs20'
     #model_cfg = omegaconf.OmegaConf.load(model_path+'/.hydra/config.yaml')
     #model.load_state_dict(torch.load(model_path+'/svae_final.pth', map_location=torch.device('cpu')))
@@ -30,7 +30,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
 
     # Sparsnet
     model = Sparsenet().to(device)
-    model_path = to_absolute_path(cfg.tests.evaluate_ll.mdl_path)
+    model_path = to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
     model_cfg = omegaconf.OmegaConf.load(model_path+'/.hydra/config.yaml')
     filename = model_cfg.models.sparsenet.prior+"_final_N{:}_llscale{:1.1e}_nf{:3d}_lr{:}.pth".format(
         model_cfg.train.sparsenet.num_steps,
@@ -52,8 +52,8 @@ def main(cfg: omegaconf.OmegaConf) -> None:
     # Get data
     _, _, test_loader = data.get_dataloaders(
         pathlib.Path(cfg.paths.user_home_dir) / pathlib.Path(cfg.paths.scratch) / "patches.pt",
-        batch_size=cfg.bin.train_svae.batch_size,
-        shuffle=cfg.bin.train_svae.shuffle,
+        batch_size=cfg.train.svae.batch_size,
+        shuffle=cfg.train.svae.shuffle,
         device=device,
     )
     batches = []
@@ -65,17 +65,17 @@ def main(cfg: omegaconf.OmegaConf) -> None:
 
     def local_ais(
             loader,
-            hmc_epsilon: float = cfg.tests.evaluate_ll.hmc_epsilon
+            hmc_epsilon: float = cfg.eval.evaluate_ll.hmc_epsilon
             ):
         with torch.no_grad():
             ais_estimate, (avg_ARs, l1_065s) = ais(
                     model, 
                     loader, 
-                    ais_length=cfg.tests.evaluate_ll.chain_length, 
-                    n_samples=cfg.tests.evaluate_ll.n_sample,
+                    ais_length=cfg.eval.evaluate_ll.chain_length, 
+                    n_samples=cfg.eval.evaluate_ll.n_sample,
                     verbose=False, 
-                    sampler=cfg.tests.evaluate_ll.sampler,
-                    schedule_type=cfg.tests.evaluate_ll.schedule_type,
+                    sampler=cfg.eval.evaluate_ll.sampler,
+                    schedule_type=cfg.eval.evaluate_ll.schedule_type,
                     epsilon_init=hmc_epsilon,
                     device=device,
                 )
@@ -95,7 +95,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         onebatch_loader = iter([next(test_loader)])
         ais_estimate, (avg_ARs, l1_065s) = local_ais(onebatch_loader, hmc_epsilon=eps)
         
-        l1_error = (torch.tensor(l1_065s)/cfg.tests.evaluate_ll.chain_length)[0].item()
+        l1_error = (torch.tensor(l1_065s)/cfg.eval.evaluate_ll.chain_length)[0].item()
         AR_error = torch.tensor(avg_ARs).mean() - 0.65
         
         if verbose: print('[{:}] AIS estimate: {:2.2f}, Avg AR: {:.4f}, HMC epsilon: {:2.3f}, L1 error: {:.4f}'.format(
@@ -109,8 +109,8 @@ def main(cfg: omegaconf.OmegaConf) -> None:
 
     print((eps - eps_learningrate*AR_error).item())
     if verbose:
-        print('for AIS with config  :', cfg.tests.evaluate_ll)
-        print('on model with config :', model_cfg.bin.train_svae)
+        print('for AIS with config  :', cfg.eval.evaluate_ll)
+        # print('on model with config :', model_cfg.models.svae)
 
         print('\nTime: {:.3f} s\n'.format(time.time()-routine_start))
 
