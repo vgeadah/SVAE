@@ -1,3 +1,5 @@
+.vscode/
+
 # Ignore slurm outputs
 slurm-*.out
 
@@ -8,3 +10,10 @@ calculations/
 
 # Ignore testing ground folder
 X/
+
+# Files to be defined
+patches.pt
+
+# Ignore build files
+build/
+svae.egg-info/
