@@ -1,4 +1,4 @@
-name: svae4
+name: svae
 
 channels:
     - pytorch

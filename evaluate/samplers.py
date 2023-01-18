@@ -2,6 +2,7 @@
 r'''
 Sampling schemes for transition operators in AIS. 
 HMC code copied form: https://github.com/lxuechen/BDMC/blob/master/hmc.py 
+Removed the adaptive HMC epsilon for stability and variance purposes.
 '''
 from typing import Callable
 from typing import Optional
@@ -99,14 +100,9 @@ def hmc_accept_reject(current_z: torch.Tensor,
     z = accept.view(-1, 1) * z + ~accept.view(-1, 1) * current_z
 
     accept_hist.add_(accept)
-    criteria = torch.gt(accept_hist / hist_len, acceptance_threshold)
+    # criteria = torch.gt(accept_hist / hist_len, acceptance_threshold)
     # accept_rate = torch.sum(torch.ones_like(criteria)[criteria])/criteria.shape[0]
     # adapt = criteria * 1.2 + ~criteria * 0.8
     epsilon.clamp_(min_step_size, max_step_size)
-    
-    # print('accept rate (AR): {:1.4f}, cumul avg AR: {:1.4f}, mean eps: {:1.1e}'.format(
-    #     torch.sum(torch.ones_like(accept)[accept])/accept.shape[0],
-    #     torch.mean(accept_hist / hist_len),
-    #     torch.mean(epsilon)
-    #     ))
+
     return z, epsilon, accept_hist

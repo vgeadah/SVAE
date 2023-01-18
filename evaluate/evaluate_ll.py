@@ -12,8 +12,6 @@ import pandas as pd
 from torch import nn, distributions
 from zmq import device
 
-import sys
-sys.path.append('/home/vg0233/PillowLab/SVAE')
 from svae.models import SVAE, Prior, Sparsenet
 from svae import data
 from ais import ais

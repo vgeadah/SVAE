@@ -27,12 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 def safe_repeat(x, n):
-    '''[2]'''
+    '''from [2]'''
     pad = [1 for _ in range(len(x.size()) - 1)]
     return x.repeat(n, *pad)
 
 def logmeanexp(x, dim=1):
-    '''[2]'''
+    '''from [2]'''
     max_, _ = torch.max(x, dim=dim, keepdim=True)
     return torch.log(torch.mean(torch.exp(x - max_), dim=dim)) + max_.squeeze(dim=dim)
 

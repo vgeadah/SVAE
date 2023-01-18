@@ -1,5 +1,8 @@
 .vscode/
 
+# ignore all
+X_*.py
+
 # Ignore slurm outputs
 slurm-*.out
 
