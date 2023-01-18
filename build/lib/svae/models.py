@@ -2,6 +2,7 @@
 import enum
 import math
 from typing import Callable, Tuple
+from jax import grad
 
 import torch
 from torch import distributions, nn
@@ -9,7 +10,97 @@ from torch.nn import functional as F
 
 from svae import horseshoe
 
+from scipy.stats import cauchy
+from sklearn.linear_model import Ridge, Lasso
+from sklearn.base import BaseEstimator
+import sklearn
+import numpy as np
+from scipy.optimize import minimize, root
 
+class CauchyRegressor(BaseEstimator):
+    def __init__(self, 
+            alpha: float = 1.0, 
+            tol: float = 0.0001,
+            ) -> None:
+        self.alpha = alpha
+        self.tol = tol
+        self.prior = cauchy() # assumes standard Cauchy(0,1) prior
+
+    def fit(self, Phi, x, method='CGM', 
+                likelihood_scale=np.exp(-2.0),
+                prior_scale=1.0):
+        '''Fit a Linear Model with Cauchy prior.
+
+        Phi: ndarray, of shape `(obs_dim, latent_dim)`
+            Row matrix of features 
+        x: ndarray, of shape `(obs_dim, )`
+            Image
+        '''
+        _, M = Phi.shape
+
+        if method == 'scipy-minimize':
+            coef0 = self.prior.rvs(size=M)
+
+            def func(z):
+                '''MAP Optimization objective
+                || x - Phi @ z ||_2^2 + alpha * log P(z)
+                '''
+                return -(np.sum(np.square(x - Phi @ z)) + self.alpha * np.sum(self.prior.logpdf(z)))
+            res = minimize(func, x0=coef0, tol=self.tol)
+            self.coef_ = res.x
+        elif method == 'CGM':
+            def f(z):
+                '''MAP Optimization objective
+                || x - Phi @ z ||_2^2 + 4 * 
+                '''
+                reconstruction_loss = (1/(2 * (likelihood_scale**2))) * np.sum(np.square(x - Phi @ z))
+                regularization = 2 * np.sum(np.log(prior_scale + z))
+                return reconstruction_loss + regularization
+
+            def grad_f(z):
+                t1 = self.Phi.T @ self.Phi @ z - 2 * self.Phi.T @ x
+                t2 = 2/(prior_scale + z)
+                return (1/likelihood_scale ** 2) * t1 + t2
+
+            def roots_analytical(z, d):
+                ones = np.ones_like(d)
+                A = self.Phi.T @ self.Phi
+                sigma = prior_scale
+                N = len(d)
+
+                c_1 = d.T @ A @ d
+                c_2 = z.T @ A @ d - sigma * d.T @ A @ ones - d.T @ A @ z - 2*x.T @ self.Phi @ d
+                c_3 = sigma * z.T @ A @ ones + z.T @ A @ z - 2*sigma* x.T @ A @ z + 2*N
+                return np.roots([c_1, c_2, c_3])
+
+            def roots_empirical(z, d):
+                func = lambda x: np.dot(f(z+x*d), d)
+                return root(func, x0=1.)
+
+            n_steps = 50
+            z_i = self.prior.rvs(size=M)  #! change this?
+            d_i = -grad_f(z_i)
+            r_i = d_i
+            for i in range(n_steps):
+                assert np.linalg.norm(d_i) > 0.
+
+                alpha_i = roots_analytical(z_i, d_i)[0]
+                z_i = z_i + alpha_i * d_i
+                r_next = - grad_f(z_i)
+                beta_i = np.dot(r_next, r_next) / np.dot(r_i, r_i)
+                d_i = r_next + beta_i * d_i
+                r_i = r_next
+
+                print(np.linalg.norm(r_i))
+
+            return z_i
+        else:
+            raise NotImplementedError
+
+
+
+
+        
 @distributions.kl.register_kl(distributions.Normal, distributions.Laplace)
 def kl_normal_laplace(
     p: distributions.Normal, q: distributions.Laplace
@@ -289,3 +380,31 @@ class Sparsenet(nn.Module):
     def _set_Phi(self, pretrained_Phi: torch.Tensor) -> None:
         self.Phi.weight = nn.Parameter(pretrained_Phi)
         return
+
+    def _set_regressor(self, tolerance) -> None:
+        prior = Prior(self.prior.item())
+        if prior== prior.GAUSSIAN:
+            alpha = 2*(self.likelihood_scale**2) # Note: pi/4 = argmin_{scale}( KL(Normal(0, scale) || Laplace(0,1)) )
+            self.reg = Ridge(alpha=alpha.item(), tol=tolerance)    # L2 penalty, or Ridge.
+        
+        elif prior==prior.CAUCHY:
+            alpha = 2*(self.likelihood_scale**2) # Note: 0.1 = argmin_{scale}( KL(Cauchy(0, scale) || Laplace(0,1)) )
+            self.reg = CauchyRegressor(alpha=alpha.item(), tol=tolerance)
+        else:
+            if prior != prior.LAPLACE:
+                print("Unrecognized prior. Reverting to LAPLACE")
+            
+            # likelihood_scale = torch.sqrt(torch.tensor(dict_coefs_lambda / 2))
+            lasso_lambda = 2*(self.likelihood_scale**2)
+            alpha = lasso_lambda/(2 * 144)
+            self.reg = Lasso(alpha=alpha.item(), tol=tolerance)    # L1 penalty, or LASSO. Fit model with coordinate descent
+
+    def _encode(self, x):
+        B, _ = x.shape
+        S = torch.zeros(B, self.latent_dim).to(x.device)
+        local_reg = sklearn.base.clone(self.reg)
+        for i in range(B):
+            local_reg.fit(self.Phi.weight.detach().cpu().numpy(), x[i, :].cpu().numpy())
+            S[i] = torch.tensor(local_reg.coef_)
+        assert torch.linalg.norm(S) != 0., 'Dictionary elements not updated. Optimization did not converge.'
+        return S

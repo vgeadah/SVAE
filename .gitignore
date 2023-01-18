@@ -1,2 +1,10 @@
 # Ignore slurm outputs
 slurm-*.out
+
+# Ignore outputs from single and multirun
+outputs/
+multirun/
+calculations/
+
+# Ignore testing ground folder
+X/

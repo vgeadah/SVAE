@@ -164,6 +164,7 @@ def run(cfg: omegaconf.OmegaConf) -> None:
         # else:
         #     beta = 1.0
         beta = 1.0
+        #print('beta-VAE training with beta = ',beta)
 
         loss = len(train_loader.dataset) * (nll + beta*kld)
         loss.backward()

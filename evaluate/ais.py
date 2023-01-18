@@ -14,9 +14,13 @@ import math
 
 from svae.models import SVAE, Prior, Sparsenet
 from svae import horseshoe
-import samplers 
 
-device = torch.device("cuda", 0)  if torch.cuda.is_available() else torch.device("cpu")
+import sys
+sys.path.append('/home/vg0233/PillowLab/SVAE')
+from likelihood_eval import samplers 
+import logging
+logger = logging.getLogger(__name__)
+# device = torch.device("cuda", 0)  if torch.cuda.is_available() else torch.device("cpu")
 
 # ---------------------------------------------------------
 # Utils
@@ -85,10 +89,11 @@ def ais(
         ais_length=100, 
         n_samples=16, 
         sampler='hmc', 
-        schedule_type='sigmoid',
-        verbose=False, 
+        schedule_type: str = 'sigmoid',
+        verbose: bool = False, 
         forward: bool = True,
         epsilon_init: float = 0.01,
+        device: torch.device = torch.device("cpu"),
     ):
     '''
     Args:
@@ -104,7 +109,7 @@ def ais(
     Returns:
         list of shape (batch_size, n_samples) of log importance weights for each batch of data
     '''
-    prior_dist = get_prior_dist(model.prior, model.prior_scale)
+    prior_dist = get_prior_dist(model.prior, model.prior_scale, device=device)
 
     def log_f_i(z, x, beta_t):
         """
@@ -118,7 +123,6 @@ def ais(
             varposterior_dist = distributions.Normal(loc, torch.exp(logscale))
             log_prior = varposterior_dist.log_prob(z).sum(axis=1)
             # log_prior = torch.clamp(varposterior_dist.log_prob(z).sum(axis=1), -1e05, 1e05)
-
         else:
             log_prior = prior_dist.log_prob(z).sum(axis=1)
         likelihood_dist = distributions.Independent(
@@ -143,7 +147,8 @@ def ais(
         import itertools
         temp, loader = itertools.tee(loader, 2)
         length = len(list(temp))
-        pbar = tqdm(total=length, desc='Evaluate ll with AIS')
+        if length>1:
+            pbar = tqdm(total=length, desc='Evaluate ll with AIS')
     
     for i, (batch_x, batch_z) in enumerate(loader):
         # if i> int(1000/32): break # break after 1000 images.
@@ -239,11 +244,11 @@ def ais(
         avg_ARs.append(avg_AR.detach().item())
         l1_065s.append(l1_065.detach().item())
         if verbose:
-            print('Batch {}, stats: {:.3f} ± {:.3f}, avg AR: {:.4f}, L1(cumulAR - 0.65): {:3.3f}'.format(
-                    i, log_w.mean().cpu().item(), log_w.std().cpu().item(), avg_AR, l1_065
+            logger.info('Batch {}, stats: {:.3f} ± {:.3f}, avg AR: {:.4f}, L1(cumulAR - 0.65): {:3.3f}'.format(
+                    i, log_w.mean().cpu().item(), log_w.std().cpu().item(), avg_AR, l1_065/ais_length
                 ))
         else:
-            pbar.update()
+            if i>0:pbar.update()
 
         # import matplotlib.pyplot as plt
         # fig, (ax_eps, ax_ar, ax_ll) = plt.subplots(nrows=3, 
