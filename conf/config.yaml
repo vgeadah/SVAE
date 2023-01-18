@@ -55,7 +55,7 @@ models:
         prior: "LAPLACE"
         likelihood_logscale: -2.0
  
-evaluate:    
+eval:    
     evaluate_ll:
         chain_length: 100
         mdl_path: outputs/2022-06-28/10-41-34/
