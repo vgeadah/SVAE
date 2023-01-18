@@ -1,2 +1,0 @@
-- bin.train_svae.prior=CAUCHY
-- bin.train_svae.learning_rate=1e-04
