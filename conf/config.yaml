@@ -63,6 +63,9 @@ eval:
         schedule_type: "linear"
         sampler: "hmc"
         hmc_epsilon: 0.01
+        model: 'SVAE'
+        vary_llscale: False
+        search_epsilon: True
     bdmc:
         mdl_path: outputs/2022-06-28/10-41-34/
         schedule_type: "linear"

@@ -1,14 +1,15 @@
 # Sparse-Coding Variational Auto-Encoders
 
-Train and evaluate the Sparse-Coding Variational Auto-Encoder (SVAE) and the Olshausen & Field (1996, 1997) original sparse coding model (coined *sparsenet*) on naturalistic images from the Berkeley Segmentation Dataset (BDSD300). 
+Accompanying code to [Sparse-Coding Variational Auto-Encoders](https://www.biorxiv.org/content/10.1101/399246v2#:~:text=The%20sparse%2Dcoding%20variational%20auto,by%20a%20deep%20neural%20network.) (SVAE). 
+Train and evaluate the SVAE and the Olshausen & Field (1996, 1997) original sparse coding model (*Sparsenet* here) on naturalistic images from the Berkeley Segmentation Dataset (BDSD300). 
 
 ## Usage
 
-First, create and activate the `svae` conda environment using the `environment.yml` file, and install the local `svae` package with `setup.py`. 
+First, create and activate the `svae` conda environment using the `environment.yml` file, and install the local `svae` package with `setup.py`. Finally, make sure to change the `paths.user_home_dir` in the `conf/config.yaml` file to your working directory.
 
 ### Training
 
-The SVAE model can be trained using the `bin/train_svae.py` file, with arguments handled through Hydra. For example:
+The SVAE model can be trained using the `bin/train_svae.py` file, with arguments handled through [Hydra](https://hydra.cc/docs/intro/). For example:
 ```
 python3 bin/train_svae.py \
     models.svae.prior='CAUCHY' \
@@ -20,7 +21,7 @@ python3 bin/train_svae.py \
 
 We use Annealed Importance Sampling (AIS) to estimate the log-likelihood on held out data of all models under consideration. We use Hamiltionian Monte Carlo for sampling, which requires a step-size dependent on the model parameters. First run `evaluate/find_hmc_epsilon.py` to determine this step size, and use it to evaluate the log-likelihood using `evaluate/evaluate_ll.py`. As a shell script:
 ```
-path="path/to/pretrained_model/"
+path="relative/path/to/pretrained_model/"
 cl=1024
 
 hmcepsilon=$(python3 evaluate/find_hmc_epsilon.py eval.evaluate_ll.chain_length=$cl eval.evaluate_ll.mdl_path=$path)

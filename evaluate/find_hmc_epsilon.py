@@ -6,8 +6,8 @@ import numpy as np
 import random 
 import time
 
-import sys
-sys.path.append('/home/vg0233/PillowLab/SVAE')
+# import sys
+# sys.path.append('/home/vg0233/PillowLab/SVAE')
 from svae.models import SVAE, Prior, Sparsenet
 from svae import data
 from ais import ais
@@ -22,22 +22,36 @@ logger = logging.getLogger(__name__)
 def search_epsilon(
         AIS_func: Callable, loader: Iterator, 
         eps_init: float=0.2, eps_learningrate: float=0.5,
-        atol: float=0.01,
+        atol: float=0.01, verbose: bool=True,
+        AIS_func_kwargs={},
         ) -> float:
+    r'''
+    Find the epsilon (step size) in the HMC routine such that the acceptance rate is close to 65%. 
+    Params:
+        AIS_func: callable, 
+            Wrapping of the `ais` function from the `ais.py` file.
+            Must have signature AIS_func(loader, hmc_epsilon, **kwargs), taking as inputs 
+            a loader and a value of epsilon. Must return the same outputs as `ais`.
+    '''
     l1_error, AR_error, counter = 1., 1., 0
     eps = eps_init
 
     while counter < 32 and not (np.abs(AR_error) < atol):
         # Compute single batch AIS estimate and error from AR=0.65
         onebatch_loader = iter([next(loader)])
-        ais_estimate, (avg_ARs, l1_065s) = AIS_func(onebatch_loader, hmc_epsilon=eps)
+        ais_estimate, (avg_ARs, l1_065s) = AIS_func(
+            onebatch_loader, 
+            hmc_epsilon=eps, 
+            **AIS_func_kwargs
+        )
         
         l1_error = (torch.tensor(l1_065s))[0].item()
         AR_error = torch.tensor(avg_ARs).mean() - 0.65
         
-        if verbose: logger.info('[{:}] AIS estimate: {:2.2f}, Avg AR: {:.4f}, HMC epsilon: {:2.3f}, L1 error: {:.4f}'.format(
-            counter, ais_estimate.mean(), torch.tensor(avg_ARs).mean(), eps, l1_error
-        ))
+        if verbose: 
+            logger.info('[{:}] AIS estimate: {:2.2f}, Avg AR: {:.4f}, HMC epsilon: {:2.3f}, L1 error: {:.4f}'.format(
+                counter, ais_estimate.mean(), torch.tensor(avg_ARs).mean(), eps, l1_error
+            ))
 
         # Update epsilon for next pass
         eps += eps_learningrate*AR_error
@@ -53,7 +67,6 @@ def main(cfg: omegaconf.OmegaConf) -> None:
     if cfg.eval.evaluate_ll.model == 'SVAE':
         model = SVAE().to(device)
         model_path = to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
-        # model_path = '/Volumes/GEADAH_3/3_Research/PillowLab/SVAE/SavedModels/SVAE/seed42/pCAUCHY_pscale-1.0_llogscale0.0_lr-2e+00_nepochs20'
         model_cfg = omegaconf.OmegaConf.load(model_path+'/.hydra/config.yaml')
         model.load_state_dict(torch.load(model_path+'/svae_final.pth', map_location=device))
 
@@ -91,6 +104,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         batches.append(paired_batch)
     test_loader = iter(batches)
 
+    # Define AIS procedure callable
     def local_ais(
             loader,
             hmc_epsilon: float = cfg.eval.evaluate_ll.hmc_epsilon
@@ -109,35 +123,16 @@ def main(cfg: omegaconf.OmegaConf) -> None:
                 )
         return ais_estimate, (avg_ARs, l1_065s)
 
-    # Start search procedure for epsilon
+    # Estimate epsilon with search procedure
     if verbose:
         logger.info('Start search procedure for epsilon.')
     routine_start = time.time()
+    
     eps = search_epsilon(AIS_func=local_ais, loader=test_loader)
-    # l1_error, AR_error, counter = 1., 1., 0
-    # eps = 0.2
-    # eps_learningrate = 0.5
 
-    # eps_array, ars_array = [], []
-    # while counter < 32 and not (np.abs(AR_error) < 0.01): # or l1_error < 0.05
-    #     # Compute single batch AIS estimate and error from AR=0.65
-    #     onebatch_loader = iter([next(test_loader)])
-    #     ais_estimate, (avg_ARs, l1_065s) = local_ais(onebatch_loader, hmc_epsilon=eps)
-        
-    #     l1_error = (torch.tensor(l1_065s)/cfg.eval.evaluate_ll.chain_length)[0].item()
-    #     AR_error = torch.tensor(avg_ARs).mean() - 0.65
-        
-    #     if verbose: logger.info('[{:}] AIS estimate: {:2.2f}, Avg AR: {:.4f}, HMC epsilon: {:2.3f}, L1 error: {:.4f}'.format(
-    #         counter, ais_estimate.mean(), torch.tensor(avg_ARs).mean(), eps, l1_error
-    #     ))
-    #     # Update epsilon for next pass
-    #     eps += eps_learningrate*AR_error
-    #     counter += 1
-    #     if (counter % 8) == 0:          # add some learning rate decay
-    #         eps_learningrate *= 0.5
-
+    # Output
     if verbose:
-        logger.info('Epsilon: ', eps)
+        logger.info('Epsilon:  {:2.8f}'.format(eps))
         logger.info('for AIS with config:')
         for key, val in  cfg.eval.evaluate_ll.items():
             logger.info('\t'+key+' : '+str(val))
@@ -153,5 +148,5 @@ def set_seed(seed):
 
 if __name__ == '__main__':
     device = torch.device("cuda", 0)  if torch.cuda.is_available() else torch.device("cpu")
-    verbose=False
+    verbose=True
     main()

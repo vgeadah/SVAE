@@ -15,9 +15,7 @@ import math
 from svae.models import SVAE, Prior, Sparsenet
 from svae import horseshoe
 
-import sys
-sys.path.append('/home/vg0233/PillowLab/SVAE')
-from likelihood_eval import samplers 
+from evaluate import samplers 
 import logging
 logger = logging.getLogger(__name__)
 # device = torch.device("cuda", 0)  if torch.cuda.is_available() else torch.device("cpu")
@@ -240,12 +238,12 @@ def ais(
         metrics = torch.tensor(metrics)
 
         avg_AR = metric2
-        l1_065 = torch.linalg.norm(metrics[1:,1]-0.65, ord=1)
+        l1_065 = torch.linalg.norm(metrics[1:,1]-0.65, ord=1)/ais_length
         avg_ARs.append(avg_AR.detach().item())
         l1_065s.append(l1_065.detach().item())
         if verbose:
             logger.info('Batch {}, stats: {:.3f} ± {:.3f}, avg AR: {:.4f}, L1(cumulAR - 0.65): {:3.3f}'.format(
-                    i, log_w.mean().cpu().item(), log_w.std().cpu().item(), avg_AR, l1_065/ais_length
+                    i, log_w.mean().cpu().item(), log_w.std().cpu().item(), avg_AR, l1_065
                 ))
         else:
             if i>0:pbar.update()
