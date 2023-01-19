@@ -19,14 +19,9 @@ python3 bin/train_svae.py \
 
 ### Evaluation
 
-We use Annealed Importance Sampling (AIS) to estimate the log-likelihood on held out data of all models under consideration. We use Hamiltionian Monte Carlo for sampling, which requires a step-size dependent on the model parameters. First run `evaluate/find_hmc_epsilon.py` to determine this step size, and use it to evaluate the log-likelihood using `evaluate/evaluate_ll.py`. As a shell script:
+We use Annealed Importance Sampling (AIS) to estimate the log-likelihood on held out data of all models under consideration. The appropriate step-size is determined in the script if `eval.evaluate_ll.search_epsilon` is True (default). To test a `SVAE` model saved in `relative/path/to/pretrained_model/` run 
 ```
-path="relative/path/to/pretrained_model/"
-cl=1024
-
-hmcepsilon=$(python3 evaluate/find_hmc_epsilon.py eval.evaluate_ll.chain_length=$cl eval.evaluate_ll.mdl_path=$path)
 python3 evaluate/evaluate_ll.py \
-    eval.evaluate_ll.mdl_path=$path \
-    eval.evaluate_ll.chain_length=$cl \
-    eval.evaluate_ll.hmc_epsilon=$hmcepsilon
+    eval.evaluate_ll.mdl_path="relative/path/to/pretrained_model" \
+    eval.evaluate_ll.chain_length=1024
 ```

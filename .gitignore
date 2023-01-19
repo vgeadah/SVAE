@@ -1,9 +1,8 @@
 .vscode/
 __pycache__/
-**/__pycache__/
 
-# general
-X_*.py
+# catch all
+X_*
 *.slurm
 
 # slurm outputs
@@ -19,7 +18,9 @@ X/
 
 # Files to be defined
 patches.pt
+bin/figures/
 
 # build files
 build/
+dist/
 svae.egg-info/
