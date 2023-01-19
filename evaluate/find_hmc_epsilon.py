@@ -6,11 +6,10 @@ import numpy as np
 import random 
 import time
 
-# import sys
-# sys.path.append('/home/vg0233/PillowLab/SVAE')
 from svae.models import SVAE, Prior, Sparsenet
 from svae import data
 from ais import ais
+import eval_utils
 
 from hydra.utils import to_absolute_path
 import os
@@ -19,74 +18,18 @@ from typing import Callable, Iterator
 import logging
 logger = logging.getLogger(__name__)
 
-def search_epsilon(
-        AIS_func: Callable, loader: Iterator, 
-        eps_init: float=0.2, eps_learningrate: float=0.5,
-        atol: float=0.01, verbose: bool=True,
-        AIS_func_kwargs={},
-        ) -> float:
-    r'''
-    Find the epsilon (step size) in the HMC routine such that the acceptance rate is close to 65%. 
-    Params:
-        AIS_func: callable, 
-            Wrapping of the `ais` function from the `ais.py` file.
-            Must have signature AIS_func(loader, hmc_epsilon, **kwargs), taking as inputs 
-            a loader and a value of epsilon. Must return the same outputs as `ais`.
-    '''
-    l1_error, AR_error, counter = 1., 1., 0
-    eps = eps_init
-
-    while counter < 32 and not (np.abs(AR_error) < atol):
-        # Compute single batch AIS estimate and error from AR=0.65
-        onebatch_loader = iter([next(loader)])
-        ais_estimate, (avg_ARs, l1_065s) = AIS_func(
-            onebatch_loader, 
-            hmc_epsilon=eps, 
-            **AIS_func_kwargs
-        )
-        
-        l1_error = (torch.tensor(l1_065s))[0].item()
-        AR_error = torch.tensor(avg_ARs).mean() - 0.65
-        
-        if verbose: 
-            logger.info('[{:}] AIS estimate: {:2.2f}, Avg AR: {:.4f}, HMC epsilon: {:2.3f}, L1 error: {:.4f}'.format(
-                counter, ais_estimate.mean(), torch.tensor(avg_ARs).mean(), eps, l1_error
-            ))
-
-        # Update epsilon for next pass
-        eps += eps_learningrate*AR_error
-        counter += 1
-        if (counter % 8) == 0:          # add some learning rate decay
-            eps_learningrate *= 0.5
-    return eps.item()
-
 @hydra.main(config_path="../conf", config_name="config", version_base="1.2")
 def main(cfg: omegaconf.OmegaConf) -> None:
 
     # Load model
-    if cfg.eval.evaluate_ll.model == 'SVAE':
-        model = SVAE().to(device)
-        model_path = to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
-        model_cfg = omegaconf.OmegaConf.load(model_path+'/.hydra/config.yaml')
-        model.load_state_dict(torch.load(model_path+'/svae_final.pth', map_location=device))
+    model = eval_utils.load_model(
+        model_class=cfg.eval.evaluate_ll.model,
+        model_path=cfg.eval.evaluate_ll.mdl_path,
+        device=device
+    )
+    model_path = hydra.utils.to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
+    logger.info(f'Loaded: {model_path}')
 
-    else:
-        model = Sparsenet().to(device)
-        model_path = to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
-        model_cfg = omegaconf.OmegaConf.load(model_path+'/.hydra/config.yaml')
-        filename = model_cfg.models.sparsenet.prior+"_final_N{:}_llscale{:1.1e}_nf{:3d}_lr{:}.pth".format(
-            model_cfg.train.sparsenet.num_steps,
-            model_cfg.models.sparsenet.likelihood_logscale, model_cfg.models.sparsenet.num_filters,
-            model_cfg.train.sparsenet.learning_rate
-            )
-        # filename = model_cfg.models.sparsenet.prior+"_N500-{:}_llscale{:1.1e}_nf{:3d}_lr{:}_manual_CGM.pth".format(
-        #     model_cfg.train.sparsenet.num_steps,
-        #     model_cfg.models.sparsenet.likelihood_logscale, model_cfg.models.sparsenet.num_filters,
-        #     model_cfg.train.sparsenet.learning_rate
-        #     )
-
-        model.load_state_dict(
-            torch.load(model_path+'/'+filename, map_location=device))
     model.eval()
     set_seed(cfg.bin.sample_patches_vanilla.seed)
 
@@ -97,12 +40,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         shuffle=cfg.train.svae.shuffle,
         device=device,
     )
-    batches = []
-    for i, x in enumerate(test_loader):
-        if i>31: break
-        paired_batch = (x, torch.empty(x.shape))
-        batches.append(paired_batch)
-    test_loader = iter(batches)
+    test_loader = eval_utils.expand_truncate_dataloader(test_loader)
 
     # Define AIS procedure callable
     def local_ais(
@@ -128,7 +66,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         logger.info('Start search procedure for epsilon.')
     routine_start = time.time()
     
-    eps = search_epsilon(AIS_func=local_ais, loader=test_loader)
+    eps = eval_utils.search_epsilon(AIS_func=local_ais, loader=test_loader, logger=logger)
 
     # Output
     if verbose:

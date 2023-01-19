@@ -26,32 +26,6 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         device=device
     )
     model_path = hydra.utils.to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
-    # if cfg.eval.evaluate_ll.model == 'SVAE':
-    #     model = SVAE().to(device)
-    #     model_path = to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
-    #     # model_path = '/Volumes/GEADAH_3/3_Research/PillowLab/SVAE/SavedModels/SVAE/seed42/pCAUCHY_pscale-1.0_llogscale0.0_lr-2e+00_nepochs20'
-    #     model_cfg = omegaconf.OmegaConf.load(model_path+'/.hydra/config.yaml')
-    #     model.load_state_dict(torch.load(model_path+'/svae_final.pth', map_location=device))
-    #     logger.info(f'Loaded: {model_path}')
-    # else:
-    #     # Sparsenet
-    #     model = Sparsenet().to(device)
-    #     model_path = to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
-    #     model_cfg = omegaconf.OmegaConf.load(model_path+'/.hydra/config.yaml')
-    #     filename = model_cfg.models.sparsenet.prior+"_final_N{:}_llscale{:1.1e}_nf{:3d}_lr{:}.pth".format(
-    #         model_cfg.train.sparsenet.num_steps,
-    #         model_cfg.models.sparsenet.likelihood_logscale, model_cfg.models.sparsenet.num_filters,
-    #         model_cfg.train.sparsenet.learning_rate
-    #         )
-
-    #     # filename = model_cfg.models.sparsenet.prior+"_N1000-{:}_llscale{:1.1e}_nf{:3d}_lr{:}_manual_CGM.pth".format(
-    #     #     model_cfg.train.sparsenet.num_steps,
-    #     #     model_cfg.models.sparsenet.likelihood_logscale, model_cfg.models.sparsenet.num_filters,
-    #     #     model_cfg.train.sparsenet.learning_rate
-    #     #     )
-    #     model.load_state_dict(
-    #         torch.load(model_path+'/'+filename, map_location=device))
-        
     logger.info(f'Loaded: {model_path}')
 
     model.eval()
@@ -65,13 +39,6 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         device=device,
     )
     test_loader = eval_utils.expand_truncate_dataloader(test_loader)
-    # batches = []
-    # for i, x in enumerate(test_loader):
-    #     if i>31: break
-    #     paired_batch = (x, torch.empty(x.shape))
-    #     batches.append(paired_batch)
-    # test_loader = iter(batches)
-
     if COMPUTE_BASELINE:
         import itertools
         test_loader, test_loader_baseline = itertools.tee(test_loader, 2)
@@ -99,6 +66,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
     # Set epsilon start value
     if cfg.eval.evaluate_ll.search_epsilon and not cfg.eval.evaluate_ll.vary_llscale:
         logger.info('Start search procedure for HMC epsilon')
+        
         def ais_func(loader, hmc_epsilon):
             return local_ais(model=model, loader=loader, hmc_epsilon=hmc_epsilon)
         epsilon = eval_utils.search_epsilon(AIS_func=ais_func, loader=test_loader, logger=logger)
@@ -107,7 +75,6 @@ def main(cfg: omegaconf.OmegaConf) -> None:
     ais_start = time.time()
 
     # Evaluate ll with AIS
-
     if cfg.eval.evaluate_ll.vary_llscale:
         eps = epsilon
         # epsilon_init_array = [0.2, 0.38, 0.65, 1.0395, 1.0869, 1.0875, 1.09, 1.09, 1.09, 1.09]
@@ -127,51 +94,15 @@ def main(cfg: omegaconf.OmegaConf) -> None:
                 ))
 
             # Determine HMC epsilon
-
             logger.info('Start search procedure for HMC epsilon')
-            # routine_start = time.time()
-            # l1_error, AR_error, counter = 1., 1., 0
-            # # eps = 0.2
-            # eps_learningrate = 0.02
-
-            # eps_array, ars_array = [], []
-            # while counter < 32 and not (np.abs(AR_error) < 0.01): # or l1_error < 0.05
-            #     # Compute single batch AIS estimate and error from AR=0.65
-            #     onebatch_loader = iter([test_dataset[0]])
-            #     ais_estimate, (avg_ARs, l1_065s) = local_ais(model, onebatch_loader, hmc_epsilon=eps)
-                
-            #     l1_error = (torch.tensor(l1_065s)/cfg.eval.evaluate_ll.chain_length)[0].item()
-            #     AR_error = torch.tensor(avg_ARs).mean() - 0.65
-                
-            #     logger.info('[{:}] AIS estimate: {:2.2f}, Avg AR: {:.4f}, HMC epsilon: {:2.3f}, L1 error: {:.4f}'.format(
-            #         counter, ais_estimate.mean(), torch.tensor(avg_ARs).mean(), eps, l1_error
-            #     ))
-
-            #     # Update epsilon for next pass
-            #     eps += eps_learningrate*AR_error
-            #     counter += 1
-
-            #     eps_array.append(eps)
-            #     ars_array.append(torch.tensor(avg_ARs).mean().item())
-
-            #     # if counter > 9:
-            #     #     '''for potential speed up, interpolate AR(hmc_eps) as a sigmoid'''
-            #     #     try:
-            #     #         popt, pcov = curve_fit(sigmoid, eps_array, ars_array)
-            #     #         eps = inv_sigmoid(0.65, *popt)
-            #     #     except OptimizeWarning:
-            #     #         continue
-
-            #     if (counter % 8) == 0:          # add some learning rate decay
-            #         eps_learningrate *= 0.5
 
             eps = eval_utils.search_epsilon(
                 AIS_func=ais_func, loader=iter(test_dataset), eps_init=eps, logger=logger
                 )
+
             logger.info(f'HMC with eps: {eps}')
 
             # Evaluate AIS at noise scale with determined HMC epsilon
-
             ais_estimate, (avg_ARs, l1_065s) = local_ais(
                 model=model, 
                 loader=iter(test_dataset), 
@@ -179,13 +110,6 @@ def main(cfg: omegaconf.OmegaConf) -> None:
                 verbose=True
                 )
             eval_utils.log_ais_metrics(logger, ais_estimate, avg_ARs, l1_065s)
-            # logger.info('Log-likelihood: {:5.5f} ± {:5.5f} per batch, averaged over dataset'.format(
-            #     ais_estimate.mean(), ais_estimate.std())
-            #     )
-            # avg_ARs = torch.tensor(avg_ARs)
-            # l1_065s = torch.tensor(l1_065s)
-            # logger.info('Average acceptance rate        : {:5.5f} ± {:5.5f}'.format(avg_ARs.mean(), avg_ARs.std()))
-            # logger.info('Average l1(cumul_avg_AR - 0.65): {:5.5f} ± {:5.5f}'.format(l1_065s.mean(), l1_065s.std()))
 
     else:
         logger.info(f'HMC with eps: {epsilon}')
@@ -199,13 +123,9 @@ def main(cfg: omegaconf.OmegaConf) -> None:
 
         logger.info('-'*80)
         logger.info('AIS estimate:')
+
         eval_utils.log_ais_metrics(logger, ais_estimate, avg_ARs, l1_065s)
-        # logger.info('\tLog-likelihood: {:5.5f} ± {:5.5f} per batch, averaged over dataset'.format(
-        #     ais_estimate.mean(), ais_estimate.std()))
-        # avg_ARs = torch.tensor(avg_ARs)
-        # l1_065s = torch.tensor(l1_065s)
-        # logger.info('\tAverage acceptance rate: {:5.5f} ± {:5.5f}'.format(avg_ARs.mean(), avg_ARs.std()))
-        # logger.info('\tAverage l1 error: {:5.5f} ± {:5.5f}'.format(l1_065s.mean(), l1_065s.std()))
+
         logger.info('\tTime: {:.3f} s'.format(time.time()-ais_start))
         logger.info('')
 
@@ -216,7 +136,9 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         else:
             file_name = 'll_estimate'
         file_suffix = f'_cl{cfg.eval.evaluate_ll.chain_length}_schedule-{cfg.eval.evaluate_ll.schedule_type}_eps{epsilon:.4f}.pt'
+        
         logger.info('Saving AIS estimate to:'+str(model_path+'/'+file_name+file_suffix))
+        
         torch.save(ais_estimate, model_path+'/'+file_name+file_suffix)
         
         logger.info('Further evaluation details:')

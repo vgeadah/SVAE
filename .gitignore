@@ -1,23 +1,24 @@
 .vscode/
+__pycache__/
 
-# ignore all
+# general
 X_*.py
 *.slurm
 
-# Ignore slurm outputs
+# slurm outputs
 slurm-*.out
 
-# Ignore outputs from single and multirun
+# outputs from single and multirun
 outputs/
 multirun/
 calculations/
 
-# Ignore testing ground folder
+# testing ground folder
 X/
 
 # Files to be defined
 patches.pt
 
-# Ignore build files
+# build files
 build/
 svae.egg-info/
