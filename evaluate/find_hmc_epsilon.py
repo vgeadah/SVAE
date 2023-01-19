@@ -15,37 +15,65 @@ from ais import ais
 from hydra.utils import to_absolute_path
 import os
 
+from typing import Callable, Iterator
+import logging
+logger = logging.getLogger(__name__)
+
+def search_epsilon(
+        AIS_func: Callable, loader: Iterator, 
+        eps_init: float=0.2, eps_learningrate: float=0.5,
+        atol: float=0.01,
+        ) -> float:
+    l1_error, AR_error, counter = 1., 1., 0
+    eps = eps_init
+
+    while counter < 32 and not (np.abs(AR_error) < atol):
+        # Compute single batch AIS estimate and error from AR=0.65
+        onebatch_loader = iter([next(loader)])
+        ais_estimate, (avg_ARs, l1_065s) = AIS_func(onebatch_loader, hmc_epsilon=eps)
+        
+        l1_error = (torch.tensor(l1_065s))[0].item()
+        AR_error = torch.tensor(avg_ARs).mean() - 0.65
+        
+        if verbose: logger.info('[{:}] AIS estimate: {:2.2f}, Avg AR: {:.4f}, HMC epsilon: {:2.3f}, L1 error: {:.4f}'.format(
+            counter, ais_estimate.mean(), torch.tensor(avg_ARs).mean(), eps, l1_error
+        ))
+
+        # Update epsilon for next pass
+        eps += eps_learningrate*AR_error
+        counter += 1
+        if (counter % 8) == 0:          # add some learning rate decay
+            eps_learningrate *= 0.5
+    return eps.item()
+
 @hydra.main(config_path="../conf", config_name="config", version_base="1.2")
 def main(cfg: omegaconf.OmegaConf) -> None:
+
     # Load model
+    if cfg.eval.evaluate_ll.model == 'SVAE':
+        model = SVAE().to(device)
+        model_path = to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
+        # model_path = '/Volumes/GEADAH_3/3_Research/PillowLab/SVAE/SavedModels/SVAE/seed42/pCAUCHY_pscale-1.0_llogscale0.0_lr-2e+00_nepochs20'
+        model_cfg = omegaconf.OmegaConf.load(model_path+'/.hydra/config.yaml')
+        model.load_state_dict(torch.load(model_path+'/svae_final.pth', map_location=device))
 
-    ## SVAE
-    #model = SVAE().to(device)
-    #model_path = to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
-    ## model_path = '/Volumes/GEADAH_3/3_Research/PillowLab/SVAE/SavedModels/SVAE/seed42/pCAUCHY_pscale-1.0_llogscale0.0_lr-2e+00_nepochs20'
-    #model_cfg = omegaconf.OmegaConf.load(model_path+'/.hydra/config.yaml')
-    #model.load_state_dict(torch.load(model_path+'/svae_final.pth', map_location=torch.device('cpu')))
-    #model.eval()
-    #set_seed(model_cfg.bin.sample_patches_vanilla.seed)
+    else:
+        model = Sparsenet().to(device)
+        model_path = to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
+        model_cfg = omegaconf.OmegaConf.load(model_path+'/.hydra/config.yaml')
+        filename = model_cfg.models.sparsenet.prior+"_final_N{:}_llscale{:1.1e}_nf{:3d}_lr{:}.pth".format(
+            model_cfg.train.sparsenet.num_steps,
+            model_cfg.models.sparsenet.likelihood_logscale, model_cfg.models.sparsenet.num_filters,
+            model_cfg.train.sparsenet.learning_rate
+            )
+        # filename = model_cfg.models.sparsenet.prior+"_N500-{:}_llscale{:1.1e}_nf{:3d}_lr{:}_manual_CGM.pth".format(
+        #     model_cfg.train.sparsenet.num_steps,
+        #     model_cfg.models.sparsenet.likelihood_logscale, model_cfg.models.sparsenet.num_filters,
+        #     model_cfg.train.sparsenet.learning_rate
+        #     )
 
-    # Sparsnet
-    model = Sparsenet().to(device)
-    model_path = to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
-    model_cfg = omegaconf.OmegaConf.load(model_path+'/.hydra/config.yaml')
-    filename = model_cfg.models.sparsenet.prior+"_final_N{:}_llscale{:1.1e}_nf{:3d}_lr{:}.pth".format(
-        model_cfg.train.sparsenet.num_steps,
-        model_cfg.models.sparsenet.likelihood_logscale, model_cfg.models.sparsenet.num_filters,
-        model_cfg.train.sparsenet.learning_rate
-        )
-
-    # filename = model_cfg.models.sparsenet.prior+"_N500-{:}_llscale{:1.1e}_nf{:3d}_lr{:}_manual_CGM.pth".format(
-    #     model_cfg.train.sparsenet.num_steps,
-    #     model_cfg.models.sparsenet.likelihood_logscale, model_cfg.models.sparsenet.num_filters,
-    #     model_cfg.train.sparsenet.learning_rate
-    #     )
-
-    model.load_state_dict(
-        torch.load(model_path+'/'+filename, map_location=device))
+        model.load_state_dict(
+            torch.load(model_path+'/'+filename, map_location=device))
     model.eval()
     set_seed(cfg.bin.sample_patches_vanilla.seed)
 
@@ -80,39 +108,43 @@ def main(cfg: omegaconf.OmegaConf) -> None:
                     device=device,
                 )
         return ais_estimate, (avg_ARs, l1_065s)
-    
 
     # Start search procedure for epsilon
-    if verbose: print('='*80)
-    routine_start = time.time()
-    l1_error, AR_error, counter = 1., 1., 0
-    eps = 0.2
-    eps_learningrate = 0.5
-
-    eps_array, ars_array = [], []
-    while counter < 32 and not (np.abs(AR_error) < 0.01): # or l1_error < 0.05
-        # Compute single batch AIS estimate and error from AR=0.65
-        onebatch_loader = iter([next(test_loader)])
-        ais_estimate, (avg_ARs, l1_065s) = local_ais(onebatch_loader, hmc_epsilon=eps)
-        
-        l1_error = (torch.tensor(l1_065s)/cfg.eval.evaluate_ll.chain_length)[0].item()
-        AR_error = torch.tensor(avg_ARs).mean() - 0.65
-        
-        if verbose: print('[{:}] AIS estimate: {:2.2f}, Avg AR: {:.4f}, HMC epsilon: {:2.3f}, L1 error: {:.4f}'.format(
-            counter, ais_estimate.mean(), torch.tensor(avg_ARs).mean(), eps, l1_error
-        ))
-        # Update epsilon for next pass
-        eps += eps_learningrate*AR_error
-        counter += 1
-        if (counter % 8) == 0:          # add some learning rate decay
-            eps_learningrate *= 0.5
-
-    print((eps - eps_learningrate*AR_error).item())
     if verbose:
-        print('for AIS with config  :', cfg.eval.evaluate_ll)
-        # print('on model with config :', model_cfg.models.svae)
+        logger.info('Start search procedure for epsilon.')
+    routine_start = time.time()
+    eps = search_epsilon(AIS_func=local_ais, loader=test_loader)
+    # l1_error, AR_error, counter = 1., 1., 0
+    # eps = 0.2
+    # eps_learningrate = 0.5
 
-        print('\nTime: {:.3f} s\n'.format(time.time()-routine_start))
+    # eps_array, ars_array = [], []
+    # while counter < 32 and not (np.abs(AR_error) < 0.01): # or l1_error < 0.05
+    #     # Compute single batch AIS estimate and error from AR=0.65
+    #     onebatch_loader = iter([next(test_loader)])
+    #     ais_estimate, (avg_ARs, l1_065s) = local_ais(onebatch_loader, hmc_epsilon=eps)
+        
+    #     l1_error = (torch.tensor(l1_065s)/cfg.eval.evaluate_ll.chain_length)[0].item()
+    #     AR_error = torch.tensor(avg_ARs).mean() - 0.65
+        
+    #     if verbose: logger.info('[{:}] AIS estimate: {:2.2f}, Avg AR: {:.4f}, HMC epsilon: {:2.3f}, L1 error: {:.4f}'.format(
+    #         counter, ais_estimate.mean(), torch.tensor(avg_ARs).mean(), eps, l1_error
+    #     ))
+    #     # Update epsilon for next pass
+    #     eps += eps_learningrate*AR_error
+    #     counter += 1
+    #     if (counter % 8) == 0:          # add some learning rate decay
+    #         eps_learningrate *= 0.5
+
+    if verbose:
+        logger.info('Epsilon: ', eps)
+        logger.info('for AIS with config:')
+        for key, val in  cfg.eval.evaluate_ll.items():
+            logger.info('\t'+key+' : '+str(val))
+
+        logger.info('Time: {:.3f} s'.format(time.time()-routine_start))
+    else:
+        print(eps)
 
 def set_seed(seed):
     torch.manual_seed(seed)
@@ -121,6 +153,5 @@ def set_seed(seed):
 
 if __name__ == '__main__':
     device = torch.device("cuda", 0)  if torch.cuda.is_available() else torch.device("cpu")
-    COMPUTE_BASELINE=True
-    verbose=True
+    verbose=False
     main()
