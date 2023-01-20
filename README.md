@@ -16,6 +16,7 @@ python3 bin/train_svae.py \
     train.svae.learning_rate=1e-05 \
     train.svae.num_epochs=32
 ```
+and similarly for the Sparsenet model, using `bin/train_sparsenet.py`. Consult the `conf/config.yaml` file to see the possible training and modelling parameters. All models are saved in `./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}`. 
 
 ### Evaluation
 
