@@ -20,6 +20,10 @@ import sklearn
 import numpy as np
 from scipy.optimize import minimize, root, root_scalar
 
+# Set logger for script
+import logging
+logger = logging.getLogger(__name__)
+
 class CauchyRegressor(BaseEstimator):
     def __init__(self, 
             prior_scale: float = 1.0, 
@@ -76,9 +80,8 @@ class CauchyRegressor(BaseEstimator):
             return hess
 
         if method is None:
+            '''Use scipy's default'''
             coef0 = self.prior.rvs(size=M)
-
-            # Use scipy's default
             res = minimize(optimization_objective_f, x0=coef0, tol=self.tol)
             self.coef_ = res.x
         
@@ -91,18 +94,6 @@ class CauchyRegressor(BaseEstimator):
             self.coef_ = res.x
 
         elif method == 'manual_CGM':
-            def roots_analytical(z, d):
-                #! outdated, false
-                ones = np.ones_like(d)
-                A = Phi.T @ Phi
-                sigma = self.prior_scale
-                N = len(d)
-
-                c_1 = d.T @ A @ d
-                c_2 = z.T @ A @ d - sigma * d.T @ A @ ones - d.T @ A @ z - 2*x.T @ Phi @ d
-                c_3 = sigma * z.T @ A @ ones + z.T @ A @ z - 2*sigma* x.T @ Phi @ z + 2*N
-                return np.roots([c_1, c_2, c_3])
-
             def roots_empirical(z, d):
                 func = lambda a: np.dot(gradient_f(z+a*d), d)
                 # roots = root(func, x0=1., method='lm')
@@ -121,28 +112,25 @@ class CauchyRegressor(BaseEstimator):
             f = lambda z: optimization_objective_f(z) # shorten notation
 
             n_steps = 10
+
+            # Initial state
             # z_0 = self.prior.rvs(size=M)
             # z_0 = np.zeros(shape=(M,)) #+ np.random.randn()
             z_0 = Phi.T @ x
             z_i = z_0
             d_i = -gradient_f(z_i)
             r_i = d_i
-            # print('')
+            
+            # Start optimization
             for i in range(n_steps):
                 start = time.time()
 
-                # alpha_i = roots_analytical(z_i, d_i)[0]
-
-                result_empirical = roots_empirical(z_i, d_i) # approx 0.0006s # 0.00036
-                # try:
-                #     alpha_i = result_empirical.x[0]
-                # except AttributeError:
-                if not result_empirical.converged:
-                    # alpha_i unchanged.
-                    print('Warning: root finding did not converge.')
+                # Calculate step size
+                result_empirical = roots_empirical(z_i, d_i)
+                if not result_empirical.converged: # alpha_i unchanged.
+                    logging.warning('Warning: root finding did not converge.')
                 else:
                     alpha_i = result_empirical.root
-
                 # alpha_i = roots_hessian(z_i, d_i)  # approx 0.006s
 
                 z_next = z_i + alpha_i * d_i
@@ -165,14 +153,7 @@ class CauchyRegressor(BaseEstimator):
                     break
                 elif np.abs((f(z_i)-f(z_previous))/f(z_previous)) < 0.01:
                     break
-
-                # if i%50 == 0:
-                # print('[{:}] f(z_i): {:4.4f}, r_i norm: {:4.4f}, alpha: {:1.2e}, step time: {:.5f}'.format(
-                #      i, f(z_next), np.linalg.norm(r_next), alpha_i, time.time()-start
-                #     ))
-                # print(np.linalg.norm(z_next-z_i,2), np.linalg.norm(z_next-z_i,1))
-
-            # print(np.linalg.norm(z_0 - z_i, 1))
+            
             assert np.linalg.norm(z_i) != 0.
             self.coef_ = z_i
 
@@ -190,10 +171,6 @@ class CauchyRegressor(BaseEstimator):
 
             # z_0 = self.prior.rvs(size=M)
             z_0 = np.zeros(shape=(M,)) #+ np.random.randn()
-            # if optimization_step < 5: # early training, take longer trajectories
-            #     T = 5.0
-            # else:
-            #     T = 0.5
             T = 100.0
 
             odesolver_result = solve_ivp(
@@ -202,10 +179,8 @@ class CauchyRegressor(BaseEstimator):
                 y0=z_0,
                 jac= lambda t,z : hessian_f(z),
             )
-            # print(odesolver_result)
 
             assert odesolver_result.success
-            # print(list(np.linalg.norm(odesolver_result.y, axis=0)[::100]))
             convergence_error = np.linalg.norm(odesolver_result.y[:,-1]-odesolver_result.y[:,-10])
             convergence_error_ratio = convergence_error/np.linalg.norm(odesolver_result.y[:,-1])
             if convergence_error_ratio > 0.01:

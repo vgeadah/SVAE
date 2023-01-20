@@ -43,6 +43,7 @@ train:
         learning_rate_decay: 0.9995    # Learning rate decay factor
         dict_coefs_tol: 0.001          # Optimization tolerance for sparse dictionary coefficients
         dict_coefs_lambda: 0.6        # Sparsity penalty for sparse dictionry coefficients
+        save_frequency: 500
 
 models:
     svae:

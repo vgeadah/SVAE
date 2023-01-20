@@ -21,54 +21,14 @@ import logging
 import numpy as np
 import time 
 
-import sys
-sys.path.append('/home/vg0233/PillowLab/SVAE')
 from svae.models import Sparsenet, Prior, CauchyRegressor
-
-# import sys
-# sys.path.append('/home/vg0233/PillowLab/SVAE')
-# from svae.models import CauchyRegressor
 
 # Set logger for script
 logger = logging.getLogger(__name__)
-print(logger)
 
-# class CauchyRegressor(BaseEstimator):
-#     def __init__(self, 
-#             alpha: float = 1.0, 
-#             tol: float = 0.0001,
-#             ) -> None:
-#         self.alpha = alpha
-#         self.tol = tol
-#         self.prior = cauchy() # assumes standard Cauchy(0,1) prior
-
-#     def fit(self, Phi, x):
-#         '''Fit a Sparse Coding model with Cauchy prior.
-
-#         Phi: ndarray, of shape `(obs_dim, latent_dim)`
-#             Row matrix of features 
-#         x: ndarray, of shape `(obs_dim, )`
-#             Image
-#         '''
-#         _, M = Phi.shape
-#         coef0 = self.prior.rvs(size=M)
-
-#         def func(z):
-#             '''MAP Optimization objective
-#                 max -|| x - Phi @ z ||_2^2 + alpha * log P(z)
-#             '''
-#             reconstruction_loss = -np.sum(np.square(x - Phi @ z)) 
-#             #regularization_term = 2 * np.sum(np.log(1+z))
-#             regularization_term = np.sum(self.prior.logpdf(z))
-#             objective = reconstruction_loss + self.alpha * regularization_term
-#             return -objective
-        
-#         res = minimize(func, x0=coef0, tol=self.tol)
-#         self.coef_ = res.x
-
-def f(local_reg, A, x):
-    local_reg.fit(A, x)
-    return local_reg.coef_
+# def f(local_reg, A, x):
+#     local_reg.fit(A, x)
+#     return local_reg.coef_
 
 def learning_rate_schedule(optimization_step):
     '''From Olhaussen & Field 1997'''
@@ -81,7 +41,7 @@ def learning_rate_schedule(optimization_step):
 
 @hydra.main(config_path="../conf", config_name="config", version_base="1.2")
 def main(cfg: omegaconf.OmegaConf) -> None:
-    torch.manual_seed(cfg.train.sparsenet.seed)
+    torch.manual_seed(cfg.train.seed)
 
     # Load data
     
@@ -143,7 +103,8 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         logger.warning(f'Using lambda: {alpha:1.5f}')
 
 
-    ## Run optimization
+    # Run optimization
+
     logger.info("Starting optimization")
     for t in range(cfg.train.sparsenet.num_steps):
 
@@ -158,16 +119,6 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         S=torch.zeros(M, cfg.train.sparsenet.minibatch_size).to(device)
         local_reg = sklearn.base.clone(reg)
         
-        #if cfg.models.sparsenet.prior=='CAUCHY': # do some multiprocessing
-        #    from multiprocessing import Pool
-        #    from itertools import repeat
-        #    regs = repeat(local_reg, cfg.train.sparsenet.minibatch_size)
-        #    As = repeat(A.cpu().numpy(), cfg.train.sparsenet.minibatch_size)
-        #    Xs = [X[:, i].cpu().numpy() for i in range(cfg.train.sparsenet.minibatch_size)]
-        #    with Pool(processes=4) as pool:
-        #        out = pool.starmap(f, zip(regs, As, Xs))
-        #        S = torch.tensor(np.array(out), dtype=torch.float32).T.to(device)
-        #else:
         for i in range(cfg.train.sparsenet.minibatch_size):
             if cfg.models.sparsenet.prior=='CAUCHY':
                 inference_method = 'manual_CGM'
@@ -218,18 +169,16 @@ def main(cfg: omegaconf.OmegaConf) -> None:
             logger.info("Step: {:}, lr: {:2.5f}, Residual Error: {:5.5f}, Features update: {:3.5f}".format(
                 t, learning_rate, E.mean().abs(), torch.norm(dA)
             ))
-            # logger.info('Feature norms: {:3.5f} ± {:3.5f}'.format(
-            #     torch.norm(A, 2, dim=0).mean(), torch.norm(A, 2, dim=0).std()
-            # ))
 
         # Every `save_frequency` steps, log and save more information.
 
-        if SAVE and (t%save_frequency == 0 or t==cfg.train.sparsenet.num_steps-1):
+        if SAVE and (t%cfg.train.sparsenet.save_frequency == 0 or t==cfg.train.sparsenet.num_steps-1):
             if cfg.models.sparsenet.prior=='GAUSSIAN': save_prior = Prior.GAUSSIAN
             elif cfg.models.sparsenet.prior=='CAUCHY': save_prior = Prior.CAUCHY
             else: save_prior = Prior.LAPLACE
 
             # Cast model as Sparsenet for saving
+            
             model = Sparsenet(
                 prior=save_prior,
                 likelihood_logscale=cfg.models.sparsenet.likelihood_logscale,
@@ -251,11 +200,9 @@ def main(cfg: omegaconf.OmegaConf) -> None:
                     )
             if cfg.models.sparsenet.prior=='CAUCHY':
                 filename += f'_{inference_method}'
-            #savedir_parent = cfg.paths.user_home_dir + '/outputs/SavedModels/sparsenet/'
+
             savedir_parent = ''
             logger.info('Saving model: '+savedir_parent+filename)
-            #if not os.path.exists(savedir_parent):
-            #    os.makedirs(savedir_parent)
             torch.save(model.state_dict(), savedir_parent+filename+'.pth')
 
             # # Quick evaluation of likelihood with AIS
@@ -264,25 +211,24 @@ def main(cfg: omegaconf.OmegaConf) -> None:
             # logger.info('Evaluate model evidence using AIS. one batch, cl: {}, schedule: {}'.format(
             #     cfg.tests.evaluate_ll.chain_length, cfg.tests.evaluate_ll.schedule_type,
             # ))
-            # for hmc_epsilon in [0.05, 0.1]:
-            #     ais_estimate, (avg_ARs, l1_065s) = ais(
-            #             model, 
-            #             loader=iter([[X.T, torch.empty(X.T.shape)]]), 
-            #             ais_length=cfg.tests.evaluate_ll.chain_length, 
-            #             n_samples=cfg.tests.evaluate_ll.n_sample,
-            #             verbose=False, 
-            #             sampler=cfg.tests.evaluate_ll.sampler,
-            #             schedule_type=cfg.tests.evaluate_ll.schedule_type,
-            #             epsilon_init=hmc_epsilon,
-            #             device=device,
-            #         )
+            # hmc_epsilon = 0.1
+            # ais_estimate, (avg_ARs, l1_065s) = ais(
+            #         model, 
+            #         loader=iter([[X.T, torch.empty(X.T.shape)]]), 
+            #         ais_length=cfg.tests.evaluate_ll.chain_length, 
+            #         n_samples=cfg.tests.evaluate_ll.n_sample,
+            #         verbose=False, 
+            #         sampler=cfg.tests.evaluate_ll.sampler,
+            #         schedule_type=cfg.tests.evaluate_ll.schedule_type,
+            #         epsilon_init=hmc_epsilon,
+            #         device=device,
+            #     )
 
-            #     l1_error = (torch.tensor(l1_065s)/cfg.tests.evaluate_ll.chain_length)[0].item()
-                
-            #     logger.info('Step: {:}, AIS estimate: {:2.2f}, Avg AR: {:.4f}, HMC eps: {:2.3f}, L1 error: {:.4f}, eval time: {:2.2f}s'.format(
-            #         t, ais_estimate.mean(), torch.tensor(avg_ARs).mean(), hmc_epsilon, l1_error, time.time()-start_time
-            #     ))
-            # logger.info('')
+            # l1_error = (torch.tensor(l1_065s)/cfg.tests.evaluate_ll.chain_length)[0].item()
+            
+            # logger.info('Step: {:}, AIS estimate: {:2.2f}, Avg AR: {:.4f}, HMC eps: {:2.3f}, L1 error: {:.4f}, eval time: {:2.2f}s'.format(
+            #     t, ais_estimate.mean(), torch.tensor(avg_ARs).mean(), hmc_epsilon, l1_error, time.time()-start_time
+            # ))
 
     # Plot
     if PLOT:
@@ -295,7 +241,6 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         plt.show();
 
 if __name__=='__main__':
-    save_frequency = 500 # in num_steps
     SAVE = True
     PLOT = False
     main()
