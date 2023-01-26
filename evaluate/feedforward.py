@@ -4,6 +4,7 @@ import omegaconf
 from skimage.filters import gabor_kernel
 import numpy as np
 import logging
+import matplotlib
 import matplotlib.pyplot as plt
 import sys
 import pandas as pd
@@ -13,7 +14,7 @@ import eval_utils
 
 logger = logging.getLogger(__name__)
 
-def pad_kernel(kernel, output_size=12):
+def pad_kernel(kernel, output_size=12, left=True):
     pad_width = output_size - kernel.shape[0]
     before = int(np.floor(pad_width/2))
     after = pad_width-before
@@ -44,13 +45,27 @@ def trim_kernel(kernel, output_size=12, left=True):
         # print(out.shape)
         return out
 
+def get_kernel(freq, theta, component='imag', left=True):
+    if component == 'imag':
+        kernel = gabor_kernel(freq, theta).imag
+    else:
+        kernel = gabor_kernel(freq, theta).real
+    
+    # Format kernel to 12x12
+    if kernel.shape[0] > 12:
+        kernel = trim_kernel(kernel, left=left)
+    elif kernel.shape[0] < 12:
+        kernel = pad_kernel(kernel, left=left)
+    return kernel
+
+
 
 
 @hydra.main(config_path="../conf", config_name="config", version_base="1.2")
 def main(cfg: omegaconf.OmegaConf) -> None:
 
     def savefig(figname):
-        plt.savefig(cfg.paths.user_home_dir+f'/evaluate/figures/{figname}.png')
+        plt.savefig(cfg.paths.user_home_dir+f'/evaluate/figures/{figname}.png', dpi=300)
         return
 
     # Load model
@@ -68,18 +83,45 @@ def main(cfg: omegaconf.OmegaConf) -> None:
 
     # Model neurons are the intersection of between the neurons with highest 
     # response norm for varying angle and freq
-    model_neurons = [72, 38, 42, 82, 158] 
+    high_norm_features = np.argsort(
+        [np.linalg.norm(model.output_weights()[:,ind].reshape(12,12)) for ind in range(169)]
+    )[-10:][::-1]
+
+    vals = np.zeros((len(angles), len(frequencies), len(high_norm_features)))
+    for i, angle in enumerate(angles):
+        for j, freq in enumerate(frequencies):
+            theta = angle/180 * np.pi
+
+            kernel = get_kernel(freq, theta)
+
+            X = torch.as_tensor(kernel, dtype=torch.float32).flatten()
+            z = model._encode(X)
+
+            vals[i,j] = [z[0].detach()[ind] for ind in high_norm_features]
+    
+    reponse_per_feature = [np.linalg.norm(vals[:,:,i], ord=1) for i in range(len(high_norm_features))]
+    model_neurons = high_norm_features[np.argsort(reponse_per_feature)[::-1][:5]]
+
+    # highresp_neurons = np.asarray(highresp_neurons).flatten()
+    # u, c = np.unique(highresp_neurons, return_counts=True)
+    # print(np.sort(c))
+    # model_neurons = u[np.argsort(c)][-10:][::-1]
+    # model_neurons = [72, 38, 42, 82, 158] 
+
     
     fig, axs =plt.subplots(ncols=len(model_neurons))
     for i, ind in enumerate(model_neurons):
-        axs[i].imshow(
-            model.output_weights()[:,ind].reshape(12,12), 
-            # vmin=torch.min(model.output_weights()), 
-            # vmax=torch.max(model.output_weights())
-            )
+        feature = model.output_weights()[:,ind].reshape(12,12)
+        axs[i].imshow(feature)
     savefig('features')
     plt.show()
     
+    fig, axs = plt.subplots(ncols=2, nrows=2, constrained_layout=True)
+    ((ax_size, ax_freq), (ax_angle, ax_amp)) = axs
+
+    for ax, label in zip(np.array(axs).flatten(), ['A','B','C','D']):
+        ax.text(-0.2, 1.1, label, fontsize='x-large', fontweight='bold',
+                transform=ax.transAxes)
     # Varying angle
 
     freq = 0.4
@@ -96,34 +138,32 @@ def main(cfg: omegaconf.OmegaConf) -> None:
 
         vals[i] = torch.tensor([z[0].detach()[n_id] for n_id in model_neurons])
 
-    fig, ax = plt.subplots()
-    ax.plot(angles, torch.abs(vals))
-    savefig('z_vals_angles')
-    plt.show()
+    ax_angle.plot(angles, torch.abs(vals))
+    ax_angle.set_xlabel('Orientation (deg.)')
+    # savefig('z_vals_angles')
+    # plt.show()
     del vals
 
-    # Varying frequency
 
-    theta = 30 / 180 * np.pi
+
+    # Varying frequency
 
     vals = torch.zeros((len(angles), len(frequencies), len(model_neurons)))
     for i, angle in enumerate(angles):
         theta = angle / 180 * np.pi
         for j, freq in enumerate(frequencies):
 
-            kernel = gabor_kernel(freq, theta).real
-            if kernel.shape[0] > 12:
-                kernel = trim_kernel(kernel)
-            elif kernel.shape[0] < 12:
-                kernel = pad_kernel(kernel)
+            temp = []
 
+            kernel = get_kernel(freq, theta)
             X = torch.as_tensor(kernel, dtype=torch.float32).flatten()
             z = model._encode(X)
 
             vals[i,j] = torch.tensor([z[0].detach()[n_id] for n_id in model_neurons])
 
-    break_points = [12,12,10,12,16]
-    fig, ax = plt.subplots()
+
+    # break_points = [12,12,10,12,16]
+    # fig, ax = plt.subplots()
 
     optim_freq_angles = []
     for i, neuron_id in enumerate(model_neurons):
@@ -131,9 +171,12 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         optim_freq_angles.append([
             neuron_id, angles[optimal_angle_index], frequencies[torch.argmax(torch.abs(vals)[optimal_angle_index,:,i])]
         ])
-        ax.plot(frequencies[:break_points[i]], torch.abs(vals)[optimal_angle_index,:break_points[i],i])
-    savefig('z_vals_freqs')
-    plt.show()
+        # ax_freq.plot(frequencies[:break_points[i]], torch.abs(vals)[optimal_angle_index,:break_points[i],i])
+        ax_freq.plot(frequencies, torch.abs(vals)[optimal_angle_index,:,i])
+
+    ax_freq.set_xlabel('Frequency (1/px.)')
+    # savefig('z_vals_freqs')
+    # plt.show()
     del vals
 
     print(optim_freq_angles)
@@ -156,11 +199,17 @@ def main(cfg: omegaconf.OmegaConf) -> None:
             vals[i,j] = z[0].detach()[model_neurons[0]]
 
     cmap = plt.get_cmap('RdBu')
-    fig, ax = plt.subplots()
+    norm = matplotlib.colors.Normalize(vmin=0.5, vmax=1.5)
+
+    # fig, ax = plt.subplots()
     for i in range(len(amplitudes)):
-        ax.plot(angles, torch.abs(vals[:,i]), c=cmap(i/len(amplitudes)))
-    savefig('variable_constrast')
-    plt.show()
+        ax_amp.plot(angles, torch.abs(vals[:,i]), c=cmap(i/len(amplitudes)))
+    # savefig('variable_constrast')
+    # plt.show()
+
+    ax_amp.set_xlabel('Orientation (deg.)')
+    cb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax_amp)
+    cb.set_label('Contrast')
 
     # Vary image size 
 
@@ -181,20 +230,19 @@ def main(cfg: omegaconf.OmegaConf) -> None:
     # plt.show()
 
 
-    plt.figure();
+    # plt.figure();
 
     for i in range(len(model_neurons)):
-        kernel = gabor_kernel(optim_freq_angles[i][2], optim_freq_angles[i][1]/180 * np.pi).real
-        if kernel.shape[0] < 12:
-            kernel = pad_kernel(kernel)
-        elif kernel.shape[0] > 12:
-            kernel = trim_kernel(kernel)
+        kernel = get_kernel(
+            freq=optim_freq_angles[i][2], 
+            theta=optim_freq_angles[i][1]/180 * np.pi,
+            )
 
-        vals = np.zeros(12)
+        vals = np.zeros(11)
 
-        X = torch.as_tensor(kernel, dtype=torch.float32).flatten()
-        z = model._encode(X)
-        vals[0] = z[0].detach()[model_neurons[i]]
+        # X = torch.as_tensor(kernel, dtype=torch.float32).flatten()
+        # z = model._encode(X)
+        # vals[0] = z[0].detach()[model_neurons[i]]
         for j in range(1,12):
             temp = []
             for left in [True, False]:
@@ -214,10 +262,18 @@ def main(cfg: omegaconf.OmegaConf) -> None:
                 z = model._encode(X)
                 temp.append(z[0].detach()[model_neurons[i]])
 
-            vals[j] = np.mean(temp)
+            vals[j-1] = np.mean(temp)
 
-        plt.plot(np.abs(vals)[::-1])
-    savefig('size')
+        ax_size.plot(np.abs(vals)[::-1])
+
+    ax_size.set_xlabel('Size (px.)')
+
+    # ----------------------------------------
+    for ax in np.array(axs).flatten():
+        ax.set_ylabel('Response (a.u.)')
+
+    # savefig('size')
+    savefig('panel')
     plt.show()
     
     # fig, axs = plt.subplots(ncols=2)
