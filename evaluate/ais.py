@@ -31,6 +31,7 @@ def safe_repeat(x, n):
 
 def logmeanexp(x, dim=1):
     '''from [2]'''
+    x = torch.as_tensor(x)
     max_, _ = torch.max(x, dim=dim, keepdim=True)
     return torch.log(torch.mean(torch.exp(x - max_), dim=dim)) + max_.squeeze(dim=dim)
 
@@ -92,6 +93,7 @@ def ais(
         forward: bool = True,
         epsilon_init: float = 0.01,
         device: torch.device = torch.device("cpu"),
+        use_posterior=False
     ):
     '''
     Args:
@@ -116,20 +118,23 @@ def ais(
                     = p(z) p(x|z)^(β_t)
         =>  log f_i = log p(z) + β_t * log p(x|z)
         """
-        if isinstance(model, SVAE):
-            loc, logscale = model._encode(x)
-            varposterior_dist = distributions.Normal(loc, torch.exp(logscale))
-            log_prior = varposterior_dist.log_prob(z).sum(axis=1)
-            # log_prior = torch.clamp(varposterior_dist.log_prob(z).sum(axis=1), -1e05, 1e05)
-        else:
-            log_prior = prior_dist.log_prob(z).sum(axis=1)
+        # Joint is the target distribution
+        log_prior = prior_dist.log_prob(z).sum(axis=1)
+        
         likelihood_dist = distributions.Independent(
                 distributions.Normal(model._decode(z), model.likelihood_scale),   # type: ignore
                 reinterpreted_batch_ndims=1,
             )
-        log_likelihood = likelihood_dist.log_prob(x)
-        # log_likelihood = torch.clamp(likelihood_dist.log_prob(x), -1e05, 1e05)
-        return log_prior + beta_t * log_likelihood
+        log_likelihood_term = likelihood_dist.log_prob(x)
+
+        if isinstance(model, SVAE) and use_posterior:
+            # Use posterior as initial distribution
+            loc, logscale = model._encode(x)
+            varposterior_dist = distributions.Normal(loc, torch.exp(logscale))
+            log_posterior = varposterior_dist.log_prob(z).sum(axis=1)
+            return beta_t * (log_likelihood_term + log_prior) + (1 - beta_t) * log_posterior
+        else:
+            return log_prior + beta_t * log_likelihood_term
 
     # Set temperature schedule
     if schedule_type=='sigmoid':
@@ -242,27 +247,13 @@ def ais(
         avg_ARs.append(avg_AR.detach().item())
         l1_065s.append(l1_065.detach().item())
         if verbose:
-            logger.info('Batch {}, stats: {:.3f} ± {:.3f}, avg AR: {:.4f}, L1(cumulAR - 0.65): {:3.3f}'.format(
-                    i, log_w.mean().cpu().item(), log_w.std().cpu().item(), avg_AR, l1_065
+            logger.info('Batch {}, LL: {:.3f}, avg AR: {:.4f}, L1(cumulAR - 0.65): {:3.3f}'.format(
+                    i, 
+                    log_w.mean().cpu().item(), #logmeanexp(log_w.flatten(), dim=0).cpu().item(), 
+                    avg_AR, l1_065
                 ))
         else:
-            if i>0:pbar.update()
-
-        # import matplotlib.pyplot as plt
-        # fig, (ax_eps, ax_ar, ax_ll) = plt.subplots(nrows=3, 
-        #     gridspec_kw={"height_ratios":[1,3,1]}, constrained_layout=True
-        #     );
-        # ax_ar.plot(betas, metrics[:,:-1]);
-        # ax_ar.axhline(y=0.65, c='k', zorder=-1);
-        # ax_ar.legend(labels=['accept rate (AR)', 'cumul avg AR', 'AR running avg'], loc=4);
-        # ax_ar.set_ylim([-0.1,1.1])
-        # ax_ar.set_ylabel('Acceptance rate')
-
-        # ax_eps.plot(betas, metrics[:,-1], color='k')
-        # ax_eps.set_ylabel('eps');
-        # ax_eps.set_yscale('log')
-
-        # ax_ll.boxplot(log_w, vert=False, showmeans=True)
-        # plt.show();
-        # raise KeyboardInterrupt
+            if i>0:
+                pbar.update()
+                
     return out, (avg_ARs, l1_065s)
