@@ -12,7 +12,7 @@ from sklearn.base import BaseEstimator
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from scipy.optimize import minimize
-from scipy.stats import cauchy
+from scipy.stats import cauchy, iqr
 import os 
 import omegaconf
 import hydra
@@ -20,7 +20,8 @@ import pathlib
 import logging
 import numpy as np
 import time 
-
+import sys
+sys.path.append('/home/vg0233/PillowLab/SVAE')
 from svae.models import Sparsenet, Prior, CauchyRegressor
 
 # Set logger for script
@@ -30,14 +31,14 @@ logger = logging.getLogger(__name__)
 #     local_reg.fit(A, x)
 #     return local_reg.coef_
 
-def learning_rate_schedule(optimization_step):
+def learning_rate_schedule(optimization_step, initial_lr=5.0):
     '''From Olhaussen & Field 1997'''
     if optimization_step < 600:
-        return 5.0
+        return initial_lr
     elif 600 <= optimization_step < 1200:
-        return 2.5
+        return initial_lr/2
     else:
-        return 1.0
+        return initial_lr/5
 
 @hydra.main(config_path="../conf", config_name="config", version_base="1.2")
 def main(cfg: omegaconf.OmegaConf) -> None:
@@ -135,7 +136,6 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         assert torch.linalg.norm(S) != 0., 'Dictionary elements not updated. Optimization did not converge.'
         
         # calculate residual error
-
         E=X-A@S        
 
         # update bases
@@ -143,29 +143,41 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         dA = E @ S.T # eq (6)
         dA = dA/cfg.train.sparsenet.minibatch_size
 
-        learning_rate = learning_rate_schedule(t)
+        learning_rate = learning_rate_schedule(t, initial_lr=cfg.train.sparsenet.learning_rate)
         A = A + learning_rate*dA
         # learning_rate = learning_rate * cfg.train.sparsenet.learning_rate_decay
         
         # normalize bases to match desired output variance
 
-        gain_adjustment = 0.01
+        gain_adjustment = 0.01              # (Olhaussen and Field, 1997)
         var_goal = avg_image_var
         basis_functions_norm = torch.norm(A, 2, dim=0)
         avg_coefficient_norm = torch.square(S).mean(dim=1)
         assert basis_functions_norm.shape == avg_coefficient_norm.shape
 
+        # Normalize bases associated with used (!=0) coefficients
         new_basis_functions_norm = torch.mul(
             basis_functions_norm,
-            torch.pow(avg_coefficient_norm / var_goal, gain_adjustment)
+            torch.where(
+                avg_coefficient_norm == 0., 
+                torch.ones_like(avg_coefficient_norm),
+                torch.pow(avg_coefficient_norm / var_goal, gain_adjustment)
+                )
             )
+
+        # # Use IQR
+        # IQR_z = iqr(S, axis=1)
+        # if cfg.models.sparsenet.prior=='GAUSSIAN': IQR_prior = 1.348*prior_scale
+        # elif cfg.models.sparsenet.prior=='CAUCHY': IQR_prior = 2 * prior_scale
+        # else: IQR_prior = 2 * prior_scale *np.log(2) # LAPLACE
 
         A = torch.mul(A, (1/new_basis_functions_norm).repeat(144,1))
         # A = torch.mul(A, (1/torch.norm(A, 2, dim=0)).repeat(144,1))
+        # A = torch.mul(A, torch.pow(torch.tensor(IQR_z/IQR_prior, dtype=torch.float), 0.05))
 
         # Optimization step finished. Log step information.
 
-        if t%2==0: 
+        if t%50==0: 
             logger.info("Step: {:}, lr: {:2.5f}, Residual Error: {:5.5f}, Features update: {:3.5f}".format(
                 t, learning_rate, E.mean().abs(), torch.norm(dA)
             ))
@@ -189,7 +201,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
             # Save model 
 
             if t==cfg.train.sparsenet.num_steps-1:
-                step_label = f'_final_N{cfg.train.sparsenet.num_steps}'
+                step_label = f'_OFnorm_final_N{cfg.train.sparsenet.num_steps}'
             else:
                 step_label = f'_N{t}-{cfg.train.sparsenet.num_steps}'
             filename = cfg.models.sparsenet.prior+step_label+\
@@ -198,8 +210,8 @@ def main(cfg: omegaconf.OmegaConf) -> None:
                     cfg.models.sparsenet.num_filters, 
                     cfg.train.sparsenet.learning_rate
                     )
-            if cfg.models.sparsenet.prior=='CAUCHY':
-                filename += f'_{inference_method}'
+            # if cfg.models.sparsenet.prior=='CAUCHY':
+            #     filename += f'_{inference_method}'
 
             savedir_parent = ''
             logger.info('Saving model: '+savedir_parent+filename)

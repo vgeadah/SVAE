@@ -6,11 +6,15 @@ import time
 import hydra
 import omegaconf
 from torch import nn, distributions
+import re
+
 
 # Import local
+import sys
+sys.path.append('/home/vg0233/PillowLab/SVAE')
 from svae.models import SVAE, Prior, Sparsenet
 from svae import data
-from ais import ais
+from ais import ais, logmeanexp
 import eval_utils
 
 import logging
@@ -20,13 +24,22 @@ logger = logging.getLogger(__name__)
 def main(cfg: omegaconf.OmegaConf) -> None:
 
     # Load model
-    model = eval_utils.load_model(
-        model_class=cfg.eval.evaluate_ll.model,
-        model_path=cfg.eval.evaluate_ll.mdl_path,
-        device=device
-    )
-    model_path = hydra.utils.to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
-    logger.info(f'Loaded: {model_path}')
+    # model = eval_utils.load_model(
+    #     model_class=cfg.eval.evaluate_ll.model,
+    #     model_path=cfg.eval.evaluate_ll.mdl_path,
+    #     device=device
+    # )
+    # model_path = hydra.utils.to_absolute_path(cfg.eval.evaluate_ll.mdl_path)
+
+    if cfg.eval.evaluate_ll.model == 'SVAE':
+        model = SVAE().to(device)
+        models_path = '/home/vg0233/PillowLab/SVAE/outputs/SavedModels/SVAE/model_files/'
+        model.load_state_dict(torch.load(models_path+cfg.eval.evaluate_ll.mdl_path, map_location=device))
+    else:
+        model = Sparsenet().to(device)
+        models_path = '/home/vg0233/PillowLab/SVAE/outputs/SavedModels/SC/model_files/'
+        model.load_state_dict(torch.load(models_path+cfg.eval.evaluate_ll.mdl_path, map_location=device))
+    logger.info(f'Loaded: {cfg.eval.evaluate_ll.mdl_path}')
 
     model.eval()
     set_seed(cfg.bin.sample_patches_vanilla.seed)
@@ -39,6 +52,8 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         device=device,
     )
     test_loader = eval_utils.expand_truncate_dataloader(test_loader)
+    # test_loader = eval_utils.expand_truncate_dataloader(train_loader)
+    # logger.info('Using TRAIN data')
     if COMPUTE_BASELINE:
         import itertools
         test_loader, test_loader_baseline = itertools.tee(test_loader, 2)
@@ -60,6 +75,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
                     schedule_type=cfg.eval.evaluate_ll.schedule_type,
                     epsilon_init=hmc_epsilon,
                     device=device,
+                    use_posterior=use_posterior
                 )
         return ais_estimate, (avg_ARs, l1_065s)
 
@@ -69,7 +85,10 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         
         def ais_func(loader, hmc_epsilon):
             return local_ais(model=model, loader=loader, hmc_epsilon=hmc_epsilon)
-        epsilon = eval_utils.search_epsilon(AIS_func=ais_func, loader=test_loader, logger=logger)
+        epsilon = eval_utils.search_epsilon(
+            AIS_func=ais_func, loader=test_loader, logger=logger,
+            eps_learningrate=0.5 if cfg.eval.evaluate_ll.model == 'SVAE' else 0.2
+            )
     else:
         epsilon = cfg.eval.evaluate_ll.hmc_epsilon
     ais_start = time.time()
@@ -97,7 +116,8 @@ def main(cfg: omegaconf.OmegaConf) -> None:
             logger.info('Start search procedure for HMC epsilon')
 
             eps = eval_utils.search_epsilon(
-                AIS_func=ais_func, loader=iter(test_dataset), eps_init=eps, logger=logger
+                AIS_func=ais_func, loader=iter(test_dataset), eps_init=eps, logger=None,
+                eps_learningrate=0.5 if cfg.eval.evaluate_ll.model == 'SVAE' else 0.1
                 )
 
             logger.info(f'HMC with eps: {eps}')
@@ -107,9 +127,52 @@ def main(cfg: omegaconf.OmegaConf) -> None:
                 model=model, 
                 loader=iter(test_dataset), 
                 hmc_epsilon=eps,
-                verbose=True
+                verbose=False
                 )
             eval_utils.log_ais_metrics(logger, ais_estimate, avg_ARs, l1_065s)
+
+            # Format dictionary entry
+            ais_estimates = torch.as_tensor(ais_estimate, dtype=float)
+            # ais_estimate = logmeanexp(ais_estimates.flatten(), dim=0).cpu().item()
+            ais_estimate = ais_estimates.mean().cpu().item()
+            avg_AR = torch.as_tensor(avg_ARs, dtype=float).mean()
+            l1_065 = torch.as_tensor(l1_065s, dtype=float).mean()
+
+            if cfg.eval.evaluate_ll.model == 'SVAE':
+                # Regular expression pattern
+                pattern = r"svae_(\w+)_ll([\+\-]?\d+(?:\.\d+)?(?:[eE][\+\-]?\d+)?)_e(\d+)_lr([\+\-]?\d+(?:\.\d+)?(?:[eE][\+\-]?\d+)?)\.pth"
+
+                # Extract values using regular expression
+                match = re.match(pattern, cfg.eval.evaluate_ll.mdl_path)
+                if match:
+                    model_dict = {
+                        'model':"SVAE",
+                        'prior': match.group(1), 'train_liklogscale': float(match.group(2)), 
+                        'epoch': int(match.group(3)), 'lr': float(match.group(4))
+                        }
+                else:
+                    model_dict = {'model': cfg.eval.evaluate_ll.mdl_path}
+            else:
+                # Regular expression pattern
+                pattern = r"(\w+)_final_N5000_llscale([\+\-]?\d+(?:\.\d+)?(?:[eE][\+\-]?\d+)?)_nf(\d+)_lr(\d+(?:\.\d+)?)"
+
+                # Extract values using regular expression
+                match = re.match(pattern, cfg.eval.evaluate_ll.mdl_path)
+                if match:
+                    model_dict = {
+                        'model':"SC",
+                        'prior': match.group(1), 'train_liklogscale': float(match.group(2)), 
+                        'epoch': 5000, 'lr': float(match.group(4))
+                        }
+                else:
+                    model_dict = {'model': cfg.eval.evaluate_ll.mdl_path}
+
+            logging.info(model_dict | {
+                'chain_length': cfg.eval.evaluate_ll.chain_length,
+                'LL':ais_estimate, 'AR': avg_AR.item(), 'l1_error': l1_065.item(), 
+                'eval_liklogscale': torch.log(model.likelihood_scale).item(),
+                'HMC_epsilon': eps
+                })
 
     else:
         logger.info(f'HMC with eps: {epsilon}')
@@ -118,7 +181,7 @@ def main(cfg: omegaconf.OmegaConf) -> None:
                 model=model, 
                 loader=test_loader, 
                 hmc_epsilon=epsilon,
-                verbose=True
+                verbose=False
                 )
 
         logger.info('-'*80)
@@ -136,14 +199,19 @@ def main(cfg: omegaconf.OmegaConf) -> None:
         else:
             file_name = 'll_estimate'
         file_suffix = f'_cl{cfg.eval.evaluate_ll.chain_length}_schedule-{cfg.eval.evaluate_ll.schedule_type}_eps{epsilon:.4f}.pt'
+
+        try:
+            logger.info('Saving AIS estimate to:'+str(model_path+'/'+file_name+file_suffix))
+            torch.save(ais_estimate, model_path+'/'+file_name+file_suffix)
+        except NameError:
+            savepath = '/home/vg0233/PillowLab/SVAE/calculations/LL/SVAE/'
+            logger.info('Saving AIS estimate to:'+savepath)
+            torch.save(ais_estimate, savepath + cfg.eval.evaluate_ll.mdl_path[:-4] + file_name + file_suffix)
         
-        logger.info('Saving AIS estimate to:'+str(model_path+'/'+file_name+file_suffix))
-        
-        torch.save(ais_estimate, model_path+'/'+file_name+file_suffix)
         
         logger.info('Further evaluation details:')
         logger.info('Model: '+cfg.eval.evaluate_ll.model)
-        logger.info('Evaluation: AIS procedure, with config:')
+        logger.info('Evaluation: AIS' + ('-post' if use_posterior else '-prior') + ' procedure, with config:')
         for key, val in cfg.eval.evaluate_ll.items():
             logger.info('\t'+key+' : '+str(val))
     
@@ -167,9 +235,11 @@ def main(cfg: omegaconf.OmegaConf) -> None:
                     reinterpreted_batch_ndims=1,
                 )
             log_likelihood = likelihood_dist.log_prob(batch_x)
-            lls_baseline.append(log_likelihood.mean().cpu().item())
+            # lls_baseline.append(log_likelihood.mean().cpu().item())
+            lls_baseline.append(logmeanexp(log_likelihood.flatten(), dim=0).cpu().item())
         logger.info('Baseline: Likelihood weighting:')
-        logger.info('\tLog-likelihood: {:5.5f} ± {:5.5f}'.format(np.mean(lls_baseline), np.std(lls_baseline)))
+        # logger.info('\tLog-likelihood: {:5.5f} ± {:5.5f}'.format(np.mean(lls_baseline), np.std(lls_baseline)))
+        logger.info('\tLog-likelihood: {:5.5f}'.format(logmeanexp(lls_baseline, dim=0)))
         logger.info('\tTime: {:.3f} s'.format(time.time()-baseline_start))
 
 def set_seed(seed):
@@ -180,4 +250,5 @@ def set_seed(seed):
 if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     COMPUTE_BASELINE=True
+    use_posterior=False
     main()

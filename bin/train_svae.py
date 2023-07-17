@@ -5,6 +5,7 @@ import math
 import pathlib
 import subprocess
 import random
+import os
 
 import hydra
 import ignite
@@ -227,9 +228,30 @@ def run(cfg: omegaconf.OmegaConf) -> None:
         {"checkpoint": model},
     )
 
+    # Absolute dir for all models
+    absolute_savedir = cfg.paths.user_home_dir + '/outputs/SavedModels/SVAE/model_files'
+    def model_filename(epoch):
+        return "svae_{:}_ll{:1.1e}_e{:}_lr{:1.1e}.pth".format(
+            cfg.models.svae.prior,
+            cfg.models.svae.likelihood_logscale,
+            epoch,
+            cfg.train.svae.learning_rate,
+        )
+        
+    @trainer.on(ignite.engine.Events.EPOCH_COMPLETED(every=16))  # Event fires every 16 epochs
+    def save_model_absolute(engine):
+        if not os.path.exists(absolute_savedir):
+            os.makedirs(absolute_savedir)
+        model_path = absolute_savedir + "/" + model_filename(engine.state.epoch)
+        torch.save(model.state_dict(), model_path)
+        logging.info(f"Saved checkpoint at {model_path}")
+
     logger.info("Beginning training...")
     trainer.run(train_loader, max_epochs=cfg.train.svae.num_epochs)
     torch.save(model.state_dict(), "svae_final.pth")
+
+
+    torch.save(model.state_dict(), absolute_savedir + "/" + model_filename(cfg.train.svae.num_epochs))
 
 
 if __name__ == "__main__":
