@@ -54,7 +54,7 @@ class CauchyRegressor(BaseEstimator):
             -|| x - Phi @ z ||_2^2 + alpha * log P(z)
             '''
             reconstruction_loss = (1/(2 * (self.likelihood_scale**2))) * np.sum(np.square(x - Phi @ z))
-            regularization = np.sum(np.log(self.prior_scale**2 + np.square(z)))
+            regularization = np.sum(np.log(np.asarray(self.prior_scale)**2 + np.square(z)))
             return reconstruction_loss + regularization
 
         def gradient_f(z):
@@ -65,7 +65,7 @@ class CauchyRegressor(BaseEstimator):
             grad = (1/self.likelihood_scale**2) * grad_ls + grad_prior
             assert grad.shape == (N,), grad.shape
 
-            return grad
+            return np.asarray(grad)
         
         def hessian_f(z):
             '''Hessian matrix  of `optimization_objective`'''
@@ -477,15 +477,21 @@ class Sparsenet(nn.Module):
 
     def _set_regressor(self, tolerance) -> None:
         prior = Prior(self.prior.item())
-        if prior== prior.GAUSSIAN:
+        # print(prior)
+        if prior== Prior.GAUSSIAN:
             alpha = 2*(self.likelihood_scale**2) # Note: pi/4 = argmin_{scale}( KL(Normal(0, scale) || Laplace(0,1)) )
             self.reg = Ridge(alpha=alpha.item(), tol=tolerance)    # L2 penalty, or Ridge.
         
-        elif prior==prior.CAUCHY:
-            alpha = 2*(self.likelihood_scale**2) # Note: 0.1 = argmin_{scale}( KL(Cauchy(0, scale) || Laplace(0,1)) )
-            self.reg = CauchyRegressor(alpha=alpha.item(), tol=tolerance)
+        elif prior==Prior.CAUCHY:
+            # alpha = 2*(self.likelihood_scale**2) # Note: 0.1 = argmin_{scale}( KL(Cauchy(0, scale) || Laplace(0,1)) )
+            # self.reg = CauchyRegressor(alpha=alpha.item(), tol=tolerance)
+            self.reg = CauchyRegressor(
+                prior_scale=self.prior_scale, 
+                likelihood_scale=self.likelihood_scale,
+                tol=tolerance
+                )
         else:
-            if prior != prior.LAPLACE:
+            if prior != Prior.LAPLACE:
                 print("Unrecognized prior. Reverting to LAPLACE")
             
             # likelihood_scale = torch.sqrt(torch.tensor(dict_coefs_lambda / 2))
@@ -494,11 +500,21 @@ class Sparsenet(nn.Module):
             self.reg = Lasso(alpha=alpha.item(), tol=tolerance)    # L1 penalty, or LASSO. Fit model with coordinate descent
 
     def _encode(self, x):
+        prior = Prior(self.prior.item())
         B, _ = x.shape
         S = torch.zeros(B, self.latent_dim).to(x.device)
         local_reg = sklearn.base.clone(self.reg)
         for i in range(B):
-            local_reg.fit(self.Phi.weight.detach().cpu().numpy(), x[i, :].cpu().numpy())
+            if prior==Prior.CAUCHY:
+                local_reg.fit(
+                    Phi=self.Phi.weight.detach().cpu().numpy(), 
+                    x=x[i, :].cpu().numpy(), 
+                    method='manual_CGM',
+                    )
+            else:
+                local_reg.fit(self.Phi.weight.detach().cpu().numpy(), x[i, :].cpu().numpy())
+
+            # local_reg.fit(self.Phi.weight.detach().cpu().numpy(), x[i, :].cpu().numpy())
             S[i] = torch.tensor(local_reg.coef_)
         assert torch.linalg.norm(S) != 0., 'Dictionary elements not updated. Optimization did not converge.'
         return S
