@@ -10,12 +10,14 @@ import random
 import time 
 
 from torch import nn, distributions
-from zmq import device
 
 from svae.models import Prior
 from svae import data
-from ais import ais
+from evaluate.ais import ais, logmeanexp
+# from evaluate import eval_utils
 
+import logging
+logger = logging.getLogger(__name__)
 
 class LinearGaussian(nn.Module):
     '''
@@ -77,8 +79,8 @@ def main(cfg: omegaconf.OmegaConf) -> None:
     else:
         _, _, test_loader = data.get_dataloaders(
             pathlib.Path(cfg.paths.user_home_dir) / pathlib.Path(cfg.paths.scratch) / "patches.pt",
-            batch_size=cfg.bin.train_svae.batch_size,
-            shuffle=cfg.bin.train_svae.shuffle,
+            batch_size=cfg.train.svae.batch_size,
+            shuffle=cfg.train.svae.shuffle,
             device=device,
         )
         batches = []
@@ -91,25 +93,35 @@ def main(cfg: omegaconf.OmegaConf) -> None:
     if COMPUTE_BASELINE:
         loader, loader_baseline = itertools.tee(loader, 2)
 
-
+    # if cfg.eval.evaluate_ll.search_epsilon:
+    #     print('Start search procedure for HMC epsilon')
+        
+    #     def ais_func(loader, hmc_epsilon):
+    #         return local_ais(model=model, loader=loader, hmc_epsilon=hmc_epsilon)
+    #     epsilon = eval_utils.search_epsilon(AIS_func=ais_func, loader=loader)
+    # else:
+    #     epsilon = cfg.eval.evaluate_ll.hmc_epsilon
 
     # Evaluate ll with AIS
     with torch.no_grad():
-        ais_estimate = ais(
+        ais_estimate, _ = ais(
             model, 
             loader, 
-            ais_length=cfg.tests.evaluate_ll.chain_length, 
-            n_samples=cfg.tests.evaluate_ll.n_sample,
+            ais_length=cfg.eval.evaluate_ll.chain_length, 
+            n_samples=cfg.eval.evaluate_ll.n_sample,
             verbose=True, 
-            sampler=cfg.tests.evaluate_ll.sampler,
-            schedule_type=cfg.tests.evaluate_ll.schedule_type,
+            sampler=cfg.eval.evaluate_ll.sampler,
+            schedule_type=cfg.eval.evaluate_ll.schedule_type,
             forward=forward,
+            epsilon_init = cfg.eval.evaluate_ll.hmc_epsilon,
         )
     
     print('-'*80+'\nModel: ', model)
-    print('\nEvaluation: AIS procedure, with config:\n'+ omegaconf.OmegaConf.to_yaml(cfg.tests.evaluate_ll))
-    print('Log-likelihood: {:5.5f} ± {:5.5f} per batch, mean/std over dataset'.format(
-        torch.mean(ais_estimate), torch.std(ais_estimate)))
+    print('\nEvaluation: AIS procedure, with config:\n'+ omegaconf.OmegaConf.to_yaml(cfg.eval.evaluate_ll))
+    print('Log-likelihood: {:5.5f} batch, over dataset'.format(
+        logmeanexp(ais_estimate.flatten(), dim=0).cpu().item()
+        ))
+        # , torch.std(ais_estimate)))
 
     if not BDMC:
         # Compare AIS estimate with true:
@@ -151,6 +163,7 @@ def set_seed(seed):
     random.seed(seed)
 
 if __name__ == '__main__':
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     COMPUTE_BASELINE=False
     main()
