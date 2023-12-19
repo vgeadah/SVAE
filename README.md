@@ -1,7 +1,7 @@
 # Sparse-Coding Variational Auto-Encoders
 
 Accompanying code to [Sparse-Coding Variational Auto-Encoders](https://www.biorxiv.org/content/10.1101/399246v2#:~:text=The%20sparse%2Dcoding%20variational%20auto,by%20a%20deep%20neural%20network.) (SVAE). 
-Train and evaluate the SVAE and the Olshausen & Field (1996, 1997) original sparse coding model (*Sparsenet* here) on naturalistic images from the Berkeley Segmentation Dataset (BDSD300). 
+This code base provides code to train and evaluate both the SVAE (presented in the paper above) and the Olshausen & Field (1996, 1997) original sparse coding model (*Sparsenet* here) on naturalistic images from the Berkeley Segmentation Dataset (BDSD300). 
 
 ## Usage
 
